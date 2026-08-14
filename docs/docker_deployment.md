@@ -12,8 +12,8 @@ Two supported deployment patterns are provided:
 Clone the repository and create the local environment file:
 
 ```bash
-git clone https://github.com/pvols79/cashflow-app-api-v2.git
-cd cashflow-app-api-v2
+git clone https://github.com/pvols79/forecast-magic.git
+cd forecast-magic
 cp .env.example .env
 ```
 

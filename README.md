@@ -30,8 +30,8 @@ Forecast Magic is independent software and is not affiliated with, endorsed by, 
 ## Install
 
 ```bash
-git clone https://github.com/pvols79/cashflow-app-api-v2.git
-cd cashflow-app-api-v2
+git clone https://github.com/pvols79/forecast-magic.git
+cd forecast-magic
 npm install
 ```
 
@@ -167,6 +167,14 @@ Forecast Magic is self-hosted. Its Node server and SQLite database run on the co
 
 Do not commit `.env`, API keys, database files, or the persistent `data` directory.
 
+## Origins and Attribution
+
+Forecast Magic began as a derivative of [Wesley Ceraso's cashflow-app](https://github.com/WesleyCeraso/cashflow-app).
+
+The original project and this derivative are distributed under the MIT License. The original copyright and permission notice are preserved in [LICENSE](LICENSE).
+
+Forecast Magic is independently maintained and is not affiliated with, endorsed by, or officially connected with Lunch Money or its developers. Lunch Money is referenced only to describe API compatibility.
+
 ## License
 
-Distributed under the MIT License. See `LICENSE`. This fork preserves the original license and attribution for Wesley Ceraso's cashflow-app.
+Distributed under the MIT License. See [LICENSE](LICENSE).
