@@ -1,8 +1,6 @@
 import axios from 'axios';
 
-const API_URL = 'https://api.lunchmoney.dev/v2';
-
-const headers = (apiKey) => ({ Authorization: `Bearer ${apiKey}` });
+const API_URL = '/api/lunch-money';
 
 export const getAccountKey = (source, id) => `${source}:${id}`;
 
@@ -58,6 +56,7 @@ export const normalizeTransaction = (transaction) => {
     type: transaction.is_pending ? 'pending' : (transaction.date > new Date().toISOString().slice(0, 10) ? 'future' : 'actual'),
     transactionId: transaction.id,
     recurringId: transaction.recurring_id,
+    lunchMoneySource: transaction.source,
     is_pending: Boolean(transaction.is_pending),
   };
 };
@@ -83,56 +82,30 @@ export const normalizeRecurringItem = (item) => {
   }));
 };
 
-export const getAccounts = async (apiKey) => {
-  const response = await axios.get(`${API_URL}/manual_accounts`, {
-    headers: headers(apiKey),
+export const getAccounts = async () => {
+  const response = await axios.get(`${API_URL}/manual-accounts`);
+  return unwrapList(response.data, 'accounts');
+};
+
+export const getRecurringItems = async (startDate, endDate) => {
+  const response = await axios.get(`${API_URL}/recurring`, {
+    params: { startDate, endDate },
   });
-  return unwrapList(response.data, 'manual_accounts').map(normalizeManualAccount);
+  return unwrapList(response.data, 'events');
 };
 
-export const getRecurringItems = async (apiKey, startDate, endDate) => {
-  const params = {
-    start_date: startDate,
-    end_date: endDate,
-  };
-
-  try {
-    const response = await axios.get(`${API_URL}/recurring`, {
-      headers: headers(apiKey),
-      params,
-    });
-    return unwrapList(response.data, 'recurring').flatMap(normalizeRecurringItem);
-  } catch (error) {
-    if (error.response?.status !== 404) throw error;
-
-    const response = await axios.get(`${API_URL}/recurring_items`, {
-      headers: headers(apiKey),
-      params,
-    });
-    return unwrapList(response.data, 'recurring_items').flatMap(normalizeRecurringItem);
-  }
+export const getPlaidAccounts = async () => {
+  const response = await axios.get(`${API_URL}/plaid-accounts`);
+  return unwrapList(response.data, 'accounts');
 };
 
-export const getPlaidAccounts = async (apiKey) => {
-  const response = await axios.get(`${API_URL}/plaid_accounts`, {
-    headers: headers(apiKey),
-  });
-  return unwrapList(response.data, 'plaid_accounts').map(normalizePlaidAccount);
-};
-
-export const getTransactions = async (apiKey, startDate, endDate) => {
+export const getTransactions = async (startDate, endDate, anchorDate = startDate) => {
   const response = await axios.get(`${API_URL}/transactions`, {
-    headers: headers(apiKey),
     params: {
-      start_date: startDate,
-      end_date: endDate,
-      include_pending: true,
+      startDate,
+      endDate,
+      anchorDate,
     },
   });
-
-  // The default v2 transaction list excludes split parents and grouped children, which avoids
-  // double-counting those transactions in a single-account projection.
-  return unwrapList(response.data, 'transactions')
-    .map(normalizeTransaction)
-    .filter(Boolean);
+  return unwrapList(response.data, 'transactions');
 };

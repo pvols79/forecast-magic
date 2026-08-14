@@ -11,7 +11,7 @@ const NegativeBalanceAlerts = ({ alerts }) => {
           <h2>
             <AccordionButton>
               <Box flex="1" textAlign="left" display="flex" alignItems="center">
-                <Heading size="lg">Negative Balance Alerts</Heading>
+                <Heading size="sm">Negative Balance Alerts</Heading>
                 {alerts.length > 0 && (
                   <Badge ml="2" colorScheme="red" fontSize="0.8em" p="1" borderRadius="md">
                     {alerts.length}
@@ -21,14 +21,14 @@ const NegativeBalanceAlerts = ({ alerts }) => {
               <AccordionIcon />
             </AccordionButton>
           </h2>
-          <AccordionPanel pb={4}>
+          <AccordionPanel px={0} pb={3}>
             {alerts.map((alert, index) => (
-              <Alert status="error" key={index} borderRadius="md" mb={4}>
+              <Alert status="error" key={index} borderRadius="md" mb={2}>
                 <AlertIcon />
                 <Box flex="1">
                   <AlertTitle>Potential Negative Balance on {alert.date}</AlertTitle>
                   <AlertDescription>
-                    Daily Balance: {formatCurrency(alert.balance)} - Occurred after "{alert.transaction.description}".
+                    Available to Spend: {formatCurrency(alert.balance)} - Occurred after "{alert.transaction.description}".
                   </AlertDescription>
                 </Box>
               </Alert>

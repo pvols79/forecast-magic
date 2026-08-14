@@ -21,7 +21,8 @@ const ApiKeyInput = ({ onApiKeySubmit }) => {
             You can find your API key in Lunch Money under Settings &gt; Developer.
             <Link href="https://lunchmoney.app/settings/developer" isExternal color="blue.500"> Click here to go to Lunch Money.</Link>
           </ChakraText>
-        <Input 
+        <Input
+          type="password"
           placeholder='Your Lunch Money API Key' 
           value={apiKey} 
           onChange={(e) => setApiKey(e.target.value)} 

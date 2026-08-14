@@ -1,0 +1,14 @@
+.git
+.github
+.codex
+.env
+.env.*
+!.env.example
+coverage
+data
+deploy
+docs
+dist
+images
+node_modules
+npm-debug.log

@@ -4,70 +4,74 @@
 Lunch Money v2
       |
       v
-API Adapter
+Local Node API Adapter
       |
       v
 Normalized Accounts + CashFlowEvents
       |
       v
-Projection Engine
-      |
-      +----> Chart
-      |
-      +----> Key Events
+Ledger Projection Engine ------------------+
+                                            |
+SQLite -> Fund Allocation Engine -----------+-> Available-to-Spend Projection
+                                                    |
+                                                    +----> Chart + tooltip
+                                                    |
+                                                    +----> Key Events
 ```
 
-## API Adapter
+## Lunch Money Boundary
 
-`src/lunchmoney.js` is the Lunch Money v2 boundary. It calls:
+`server/services/lunchMoneyService.js` owns remote API access. The browser calls the same-origin local REST API and never needs direct access to Lunch Money.
 
-- `GET /v2/manual_accounts`
-- `GET /v2/plaid_accounts`
-- `GET /v2/recurring`, with a fallback to `GET /v2/recurring_items` when the live API returns 404
-- `GET /v2/transactions` with `include_pending=true`
+The service calls manual accounts, Plaid accounts, categories, recurring items, and transactions with pending activity included. It preserves the Phase I normalized account identity and internal amount convention.
 
-The adapter normalizes API responses before the projection engine receives them.
+Lunch Money transaction amounts are inverted once at this boundary:
+
+- Positive internal amount means cash enters the selected account.
+- Negative internal amount means cash leaves the selected account.
+
+Transactions include their Lunch Money `category_id` so the Fund Allocation layer can evaluate mappings without embedding Fund policy into the ledger engine.
+
+## Ledger Projection
+
+`src/projection.js` remains the ledger-event engine. It handles account filtering, pending and future activity, recurring matching, missed recurring obligations, daily closing balances, Key Events, and negative-balance candidates.
+
+Missed recurring occurrences on or before the anchor still reduce the opening projection and appear in the carousel. Fund Allocations do not enter this engine as `CashFlowEvent` objects.
+
+## Available-To-Spend Layer
+
+`src/availableToSpend.js` combines each projected ledger day with the corresponding reserved Fund amount:
+
+```text
+availableBalance = ledgerBalance - reservedOperationalFunds
+```
+
+The existing chart displays only `availableBalance`. Admin receives the latest actual Lunch Money account balance separately; there is no second chart line.
+
+Fund Allocation state and boundary annotations are passed directly to chart tooltips. They are never added to `keyEvents`, so the recurring carousel remains focused on financial events.
 
 ## Account Identity
 
-Lunch Money manual account IDs and Plaid account IDs are treated as separate namespaces. The app uses compound keys:
+Every normalized account and event uses a compound key:
 
 - `manual:<id>`
 - `plaid:<id>`
 
-Every normalized cash-flow event carries the same compound account key. Single-account projection filtering compares this key, not just a numeric ID.
+Funds store the same `account_key`. The backend and both projection layers filter by this key, preventing another account's Funds or transactions from affecting the selected account.
 
-## Sign Convention
+## Persistence
 
-Lunch Money v2 uses positive amounts for debits and negative amounts for credits. The adapter inverts this once:
+SQLite stores settings, Funds, category mappings, exclusions, and one current-period checkpoint per Fund. Repository classes isolate SQL from business logic.
 
-- internal positive amount = money entering the selected account
-- internal negative amount = money leaving the selected account
+The checkpoint is overwritten as periods advance. Completed Fund periods and copies of Lunch Money transactions are not retained. Its only purpose is carrying the minimum rollover state into the current period.
 
-Projection, charting, Key Events, and local transactions all use the internal convention.
+Versioned SQL migrations run at server startup. In Docker, `/data/app.db` must be backed by a volume.
 
-## Transactions
+## Local Preferences
 
-Transactions are loaded for the projection range with pending transactions included. Posted future-dated transactions and pending transactions can affect the projection when they belong to the selected account.
+Only non-authoritative UI preferences remain in browser `localStorage`:
 
-The app uses the default v2 transaction list behavior for split and grouped transactions. By default, v2 excludes split parents and grouped children from the list, which avoids double-counting parent/child transaction structures in this single-account projection.
+- Selected account
+- Projection horizon
 
-## Recurring Reconciliation
-
-Recurring items are loaded from the v2 recurring endpoint using the projection date range. Projected recurring events are created only from `matches.missing_transaction_dates`.
-
-When Lunch Money has already matched an occurrence to an actual or pending transaction, the transaction is used and no projected recurring duplicate is created. The projection engine also removes any recurring projection that shares the same `recurringId`, date, and account key as a real transaction event.
-
-## Local Transactions
-
-Local transactions remain in browser `localStorage` and are not synced to Lunch Money. They are normalized as `local` cash-flow events and filtered to the selected account before projection.
-
-## Tests
-
-Run:
-
-```bash
-npm test
-```
-
-The projection tests cover deterministic daily balances, recurring deduplication, account isolation, and Lunch Money v2 sign normalization.
+Fund Allocations, timezone, exclusions, and the fallback API key are authoritative in SQLite and therefore shared across browsers and machines using the same installation.

@@ -16,32 +16,10 @@ function getLocalDateString(date) {
   return `${year}-${month}-${day}`;
 }
 
-const dateFromInput = (date) => {
-  if (date instanceof Date) return date;
-  return new Date(`${date}T00:00:00Z`);
-};
-
 const eventAffectsSelectedAccount = (event, selectedAccount) => {
   if (event.accountKey) return event.accountKey === selectedAccount.key;
-
-  // Legacy browser-local records stored numeric account_id before Phase I account keys.
-  return event.account_id != null && (
-    String(event.account_id) === selectedAccount.key ||
-    String(event.account_id) === String(selectedAccount.id)
-  );
+  return false;
 };
-
-const normalizeLocalTransaction = (transaction, selectedAccount) => ({
-  id: `local:${transaction.id}`,
-  accountId: selectedAccount.id,
-  accountSource: selectedAccount.source,
-  accountKey: selectedAccount.key,
-  date: getUTCDateString(dateFromInput(transaction.date)),
-  description: transaction.description || 'Local Transaction',
-  amount: parseFloat(transaction.amount),
-  type: 'local',
-  is_local: true,
-});
 
 const removeSatisfiedRecurringProjections = (events) => {
   const satisfiedRecurringOccurrences = new Set(
@@ -56,7 +34,20 @@ const removeSatisfiedRecurringProjections = (events) => {
   });
 };
 
-export const projectCashFlow = (accounts, cashFlowEvents, selectedAccountId, projectionHorizonMonths, localTransactions = [], options = {}) => {
+// A transaction created from a recurring item is not reflected in a synced
+// account's current balance, even when its chosen date is today or earlier.
+const isOpeningAdjustment = (event, anchorDate) =>
+  event.date <= anchorDate && (
+    event.type === 'recurring-projected'
+    || event.lunchMoneySource === 'recurring'
+  );
+
+const getOpeningAdjustmentEvents = (events, predicate) =>
+  events
+    .filter(predicate)
+    .sort((a, b) => new Date(a.date) - new Date(b.date));
+
+export const projectCashFlow = (accounts, cashFlowEvents, selectedAccountId, projectionHorizonMonths, options = {}) => {
   const selectedAccount = accounts.find(acc => acc.key === selectedAccountId);
   if (!selectedAccount) return null;
 
@@ -67,33 +58,39 @@ export const projectCashFlow = (accounts, cashFlowEvents, selectedAccountId, pro
 
   const selectedApiEvents = cashFlowEvents
     .filter(event => eventAffectsSelectedAccount(event, selectedAccount))
-    .filter(event => event.date >= anchorDate && event.date <= getUTCDateString(projectionEndDate))
-    .filter(event => event.type !== 'actual' || event.date > anchorDate);
+    .filter(event => event.date <= getUTCDateString(projectionEndDate))
+    .filter(event => event.type === 'recurring-projected' || event.lunchMoneySource === 'recurring' || event.date >= anchorDate)
+    .filter(event => event.type !== 'actual' || event.date > anchorDate || event.lunchMoneySource === 'recurring');
 
-  const selectedLocalEvents = localTransactions
-    .filter(t => eventAffectsSelectedAccount(t, selectedAccount))
-    .map(t => normalizeLocalTransaction(t, selectedAccount))
-    .filter(event => event.date >= anchorDate && event.date <= getUTCDateString(projectionEndDate));
-
+  const openingAdjustmentEvents = getOpeningAdjustmentEvents(
+    selectedApiEvents,
+    event => isOpeningAdjustment(event, anchorDate)
+  );
+  const openingAdjustmentTotal = openingAdjustmentEvents
+    .reduce((sum, event) => sum + parseFloat(event.amount), 0);
+  const historicalMissedEvents = getOpeningAdjustmentEvents(
+    selectedApiEvents,
+    event => event.type === 'recurring-projected' && event.date <= anchorDate
+  );
   const projectedTransactions = removeSatisfiedRecurringProjections([
-    ...selectedApiEvents,
-    ...selectedLocalEvents,
+    ...selectedApiEvents.filter(event => !isOpeningAdjustment(event, anchorDate)),
   ]);
 
   projectedTransactions.sort((a, b) => new Date(a.date) - new Date(b.date));
 
   const dailyBalances = [];
   const negativeBalanceAlerts = [];
-  const keyEvents = [
-    {
-      date: getUTCDateString(projectionStartDate),
-      description: 'Starting Balance',
-      amount: 0,
-      is_subtotal: false,
-      balance: parseFloat(selectedAccount.balance)
-    }
-  ];
-  let currentBalance = parseFloat(selectedAccount.balance);
+  const syncedAccountBalance = parseFloat(selectedAccount.balance);
+  const startingBalance = syncedAccountBalance + openingAdjustmentTotal;
+  const openingBalance = {
+    date: anchorDate,
+    syncedAccountBalance,
+    adjustmentEvents: openingAdjustmentEvents,
+    adjustmentTotal: openingAdjustmentTotal,
+    ledgerBalance: startingBalance,
+  };
+  const keyEvents = [];
+  let currentBalance = startingBalance;
   let monthlyChange = 0;
   let monthlyCredit = 0;
   let monthlyDebit = 0;
@@ -135,7 +132,7 @@ export const projectCashFlow = (accounts, cashFlowEvents, selectedAccountId, pro
         } else {
           monthlyDebit += parseFloat(t.amount);
         }
-        keyEvents.push({ ...t, balance: currentBalance, is_local: t.is_local });
+        keyEvents.push({ ...t, balance: currentBalance });
     });
 
     // Check for negative balance after all transactions for the day
@@ -158,5 +155,11 @@ export const projectCashFlow = (accounts, cashFlowEvents, selectedAccountId, pro
     balance: currentBalance
   });
 
-  return { dailyBalances, keyEvents, negativeBalanceAlerts };
+  const anchorDateEvents = projectedTransactions.filter(event => event.date === anchorDate);
+  openingBalance.anchorDateEvents = anchorDateEvents;
+  openingBalance.anchorDateEventTotal = anchorDateEvents
+    .reduce((sum, event) => sum + parseFloat(event.amount), 0);
+  openingBalance.projectedLedgerBalance = dailyBalances[0]?.balance ?? startingBalance;
+
+  return { dailyBalances, keyEvents, negativeBalanceAlerts, historicalMissedEvents, openingBalance };
 };

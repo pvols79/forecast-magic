@@ -6,6 +6,18 @@ const theme = extendTheme({
     useSystemColorMode: true,
   },
   colors: {
+    magic: {
+      50: '#f6f3ff',
+      100: '#ede7ff',
+      200: '#d9ccff',
+      300: '#b99cff',
+      400: '#9364f4',
+      500: '#7138d0',
+      600: '#5725aa',
+      700: '#3d1d7a',
+      800: '#21184f',
+      900: '#0b1233',
+    },
     brand: {
       900: '#1a202c',
       800: '#2d3748',
@@ -16,6 +28,15 @@ const theme = extendTheme({
       300: '#e2e8f0',
       200: '#edf2f7',
       100: '#f7fafc',
+    },
+  },
+  styles: {
+    global: {
+      'button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible, [tabindex]:focus-visible': {
+        outline: '2px solid',
+        outlineColor: 'blue.400',
+        outlineOffset: '2px',
+      },
     },
   },
   components: {

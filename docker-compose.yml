@@ -1,0 +1,20 @@
+services:
+  forecast-magic:
+    image: forecast-magic:local
+    build: .
+    init: true
+    restart: unless-stopped
+    ports:
+      - "${FORECAST_MAGIC_BIND_ADDRESS:-127.0.0.1}:${FORECAST_MAGIC_PORT:-3000}:3000"
+    environment:
+      PORT: 3000
+      DATABASE_PATH: /data/app.db
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      SESSION_SECRET: ${SESSION_SECRET:-}
+      REPORTING_API_TOKEN: ${REPORTING_API_TOKEN:-}
+      LUNCH_MONEY_API_KEY: ${LUNCH_MONEY_API_KEY:-}
+    volumes:
+      - forecast-magic-data:/data
+
+volumes:
+  forecast-magic-data:

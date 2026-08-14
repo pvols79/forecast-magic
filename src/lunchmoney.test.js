@@ -10,9 +10,11 @@ describe('Lunch Money v2 normalization', () => {
       payee: 'Debit',
       amount: '100.00',
       is_pending: false,
+      source: 'plaid',
     })).toMatchObject({
       accountKey: 'plaid:123',
       amount: -100,
+      lunchMoneySource: 'plaid',
     });
 
     expect(normalizeTransaction({
@@ -22,9 +24,11 @@ describe('Lunch Money v2 normalization', () => {
       payee: 'Credit',
       amount: '-1000.00',
       is_pending: false,
+      source: 'recurring',
     })).toMatchObject({
       accountKey: 'manual:456',
       amount: 1000,
+      lunchMoneySource: 'recurring',
     });
   });
 });
