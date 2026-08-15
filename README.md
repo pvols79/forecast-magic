@@ -21,6 +21,16 @@ Forecast Magic is independent software and is not affiliated with, endorsed by, 
 - Persistent SQLite configuration for use across browsers and machines
 - Light and dark modes
 
+## Screenshots
+
+### Cash-Flow Projection and Upcoming Activity
+
+![Forecast Magic cash-flow projection and upcoming activity in dark mode](images/forecast-overview-dark.png)
+
+### Fund Allocations
+
+![Forecast Magic Fund Allocations in dark mode](images/fund-allocations-dark.png)
+
 ## Requirements
 
 - Node.js 22 or later
