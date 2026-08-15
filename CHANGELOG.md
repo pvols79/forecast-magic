@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.1 - Docker Runtime Fix
+
+- Included the shared projection modules required by the reporting service in the production container image.
+
 ## 0.1.0 - Initial Forecast Magic Preview
 
 - Migrated the Lunch Money integration from API v1 to API v2.
