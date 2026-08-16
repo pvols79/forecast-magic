@@ -18,6 +18,8 @@ Forecast Magic is independent software and is not affiliated with, endorsed by, 
 - No, full, and capped rollover
 - Lunch Money category drawdown and per-transaction exclusions
 - Admin and read-only Household presentations
+- Admin-only review of likely manual/imported Lunch Money duplicates
+- On-demand Admin or Household Daily Financial Highlight PDFs with share, download, and print actions
 - Persistent SQLite configuration for use across browsers and machines
 - Light and dark modes
 
@@ -152,7 +154,11 @@ The transaction detail button lists every qualifying transaction in the current 
 
 `GET /api/analytics/overview?accountKey=plaid:123` exposes reusable structured cash-position, recurring-attention, spending-trend, unallocated-spending, and Household Fund card data. It always calculates a six-month projection independently of the UI horizon. See [Reporting Readiness Audit](docs/reporting_readiness.md) for definitions and the metric matrix.
 
-For automation, `GET /api/reporting/daily-highlight?accountKey=plaid:123` exposes the same calculations as a versioned, consolidated JSON report, including the complete six-month daily projection series. It requires a dedicated `REPORTING_API_TOKEN` Bearer credential and never accepts the Lunch Money API key as an automation credential. See [Reporting API](docs/reporting_api.md) for n8n configuration and the response contract.
+For automation, `GET /api/reporting/daily-highlight?accountKey=plaid:123&view=admin` exposes the same calculations as a versioned, consolidated JSON report, including the complete six-month daily projection series. It requires a dedicated `REPORTING_API_TOKEN` Bearer credential and never accepts the Lunch Money API key as an automation credential. Schema 1.2 includes report context, recurring urgency, six-month summary metrics, explicit Fund visibility, and role-aware filtering. See [Reporting API](docs/reporting_api.md) for n8n configuration and the response contract.
+
+The Daily Highlight also includes a read-only count and summary of High- and Medium-confidence duplicate candidates. Detection, review, metadata merging, and destructive resolution remain Admin-only. See [Duplicate Review](docs/duplicate_review.md) for the matching and safety boundaries.
+
+The Share Report menu requests a fresh PDF for the selected account and active Admin or Household view. It can open the native file-share sheet, download the PDF, or open the browser print dialog. The PDF is streamed from memory and uses the same report model as the JSON API.
 
 The adapter normalizes Lunch Money's transaction signs once:
 

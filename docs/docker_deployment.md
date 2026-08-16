@@ -199,6 +199,8 @@ Authorization: Bearer <REPORTING_API_TOKEN>
 
 Do not place the Lunch Money API key in n8n. The separate reporting token limits automation access to the read-only reporting contract.
 
+Ad hoc PDF generation uses the pure-JavaScript PDFKit dependency included by `npm ci`. It requires no Chromium package, additional volume, temporary report directory, NGINX location, or certificate change. The existing reverse-proxy timeout and response-size defaults are sufficient for normal personal-finance reports.
+
 ## Updating
 
 Back up the SQLite volume, pull the desired code revision, then rebuild only Forecast Magic:

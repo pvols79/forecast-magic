@@ -1,7 +1,12 @@
 import { addDays } from './periods.js';
 
+const DAY_MS = 24 * 60 * 60 * 1000;
 const toCents = amount => Math.round(Number(amount || 0) * 100);
 const normalizedName = value => String(value || '').trim().toLowerCase();
+
+const daysBetween = (fromDate, toDate) => Math.round(
+  (new Date(`${toDate}T00:00:00Z`).getTime() - new Date(`${fromDate}T00:00:00Z`).getTime()) / DAY_MS
+);
 
 const projectionPoint = day => day ? {
   date: day.date,
@@ -19,19 +24,44 @@ const lowestPoint = (days, startDate, endDate) => {
   ), null);
 };
 
+const extremePoint = (points, compare) => points.reduce((extreme, point) => (
+  !extreme || compare(point.availableCents, extreme.availableCents) ? point : extreme
+), null);
+
 export const summarizeCashPosition = (projection, anchorDate) => {
   const days = projection?.dailyBalances || [];
+  const projectionSeries = days.map(projectionPoint);
+  const availableToday = projectionPoint(days.find(day => day.date === anchorDate) || days[0]);
+  const endingAvailable = projectionSeries.at(-1) || null;
   return {
     asOfDate: anchorDate,
-    availableToday: projectionPoint(days.find(day => day.date === anchorDate) || days[0]),
+    availableToday,
     thirtyDayLow: lowestPoint(days, anchorDate, addDays(anchorDate, 29)),
     ninetyDayLow: lowestPoint(days, anchorDate, addDays(anchorDate, 89)),
-    sixMonthSnapshot: projectionPoint(days.at(-1)),
-    projectionSeries: days.map(projectionPoint),
+    sixMonthSnapshot: endingAvailable,
+    sixMonthLow: extremePoint(projectionSeries, (value, extreme) => value < extreme),
+    sixMonthHigh: extremePoint(projectionSeries, (value, extreme) => value > extreme),
+    endingAvailable,
+    netAvailableChange: availableToday && endingAvailable ? {
+      startDate: availableToday.date,
+      endDate: endingAvailable.date,
+      amountCents: endingAvailable.availableCents - availableToday.availableCents,
+    } : null,
+    projectionSeries,
   };
 };
 
-const attentionEvent = event => ({
+const recurringTiming = (date, anchorDate) => {
+  const dayOffset = daysBetween(anchorDate, date);
+  if (dayOffset < 0) {
+    return { daysPastDue: Math.abs(dayOffset), daysUntilDue: null, urgency: 'past_due' };
+  }
+  if (dayOffset === 0) return { daysPastDue: null, daysUntilDue: 0, urgency: 'due_today' };
+  if (dayOffset <= 2) return { daysPastDue: null, daysUntilDue: dayOffset, urgency: 'due_48h' };
+  return { daysPastDue: null, daysUntilDue: dayOffset, urgency: 'upcoming' };
+};
+
+const attentionEvent = (event, anchorDate) => ({
   id: event.id,
   recurringId: event.recurringId,
   accountKey: event.accountKey,
@@ -41,6 +71,7 @@ const attentionEvent = event => ({
   type: event.type,
   status: event.status,
   transactionId: event.transactionId,
+  ...recurringTiming(event.date, anchorDate),
 });
 
 export const summarizeRecurringAttention = (missingEvents, occurrences, accountKey, anchorDate) => {
@@ -57,8 +88,10 @@ export const summarizeRecurringAttention = (missingEvents, occurrences, accountK
   return {
     asOfDate: anchorDate,
     dueThrough,
-    pastDueRecurring: missing.filter(event => event.date < anchorDate).map(attentionEvent),
-    dueWithin48Hours: upcomingExpenses.map(attentionEvent),
+    pastDueRecurring: missing
+      .filter(event => event.date < anchorDate)
+      .map(event => attentionEvent(event, anchorDate)),
+    dueWithin48Hours: upcomingExpenses.map(event => attentionEvent(event, anchorDate)),
   };
 };
 
@@ -187,8 +220,8 @@ export const summarizeUnallocatedSpending = (transactions, categories, funds, ac
   };
 };
 
-export const householdFundCards = funds => funds
-  .filter(fund => fund.householdVisible)
+export const fundCards = (funds, view = 'household') => funds
+  .filter(fund => view === 'admin' || fund.householdVisible)
   .map(fund => ({
     id: fund.id,
     accountKey: fund.accountKey,
@@ -201,4 +234,7 @@ export const householdFundCards = funds => funds
     remainingCents: fund.remainingCents,
     targetCents: fund.targetCents,
     scheduledAllocationCents: fund.scheduledAllocationCents,
+    householdVisible: Boolean(fund.householdVisible),
   }));
+
+export const householdFundCards = funds => fundCards(funds, 'household');

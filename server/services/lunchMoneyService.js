@@ -53,6 +53,34 @@ export class LunchMoneyService {
     return response.data;
   }
 
+  async put(path, data, params = {}) {
+    const apiKey = this.getApiKey();
+    if (!apiKey) {
+      const error = new Error('Lunch Money API key is not configured.');
+      error.status = 401;
+      throw error;
+    }
+    const response = await axios.put(`${config.lunchMoneyBaseUrl}${path}`, data, {
+      headers: { Authorization: `Bearer ${apiKey}` },
+      params,
+    });
+    return response.data;
+  }
+
+  async delete(path, data) {
+    const apiKey = this.getApiKey();
+    if (!apiKey) {
+      const error = new Error('Lunch Money API key is not configured.');
+      error.status = 401;
+      throw error;
+    }
+    const response = await axios.delete(`${config.lunchMoneyBaseUrl}${path}`, {
+      headers: { Authorization: `Bearer ${apiKey}` },
+      data,
+    });
+    return response.data;
+  }
+
   normalizeAccount(account, source) {
     return {
       id: account.id,
@@ -167,15 +195,35 @@ export class LunchMoneyService {
   }
 
   async getTransactions(startDate, endDate, anchorDate = startDate) {
+    const transactions = await this.getRawTransactions(startDate, endDate);
+    return transactions
+      .map(transaction => this.normalizeTransaction(transaction, anchorDate))
+      .filter(Boolean);
+  }
+
+  async getRawTransactions(startDate, endDate) {
     const data = await this.get('/transactions', {
       start_date: startDate,
       end_date: endDate,
       include_pending: true,
     });
     // Default v2 behavior omits split parents and grouped children, preventing double-counting.
-    return unwrapList(data, 'transactions')
-      .map(transaction => this.normalizeTransaction(transaction, anchorDate))
-      .filter(Boolean);
+    return unwrapList(data, 'transactions');
+  }
+
+  async getTransaction(transactionId) {
+    const data = await this.get(`/transactions/${transactionId}`);
+    return data?.transaction || data;
+  }
+
+  async updateTransaction(transactionId, update) {
+    const data = await this.put(`/transactions/${transactionId}`, update, { update_balance: false });
+    return data?.transaction || data;
+  }
+
+  async deleteTransaction(transactionId) {
+    await this.delete(`/transactions/${transactionId}`);
+    return true;
   }
 
   async getRecurringData(startDate, endDate) {

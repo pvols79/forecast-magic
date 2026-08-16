@@ -27,13 +27,32 @@ describe('FinancialAnalyticsService', () => {
         }],
       }),
     };
+    const fund = (id, name, householdVisible) => ({
+      id, accountKey: 'plaid:1', name, fundType: 'operating', allocationMode: 'scheduled',
+      periodType: 'monthly', periodStart: '2026-08-01', periodEnd: '2026-08-31',
+      remainingCents: 10000, targetCents: null, scheduledAllocationCents: 10000,
+      householdVisible,
+    });
     const fundService = {
-      getProjection: async () => ({ currentFunds: [], currentReservedCents: 0, days: [] }),
+      getProjection: async () => ({
+        currentFunds: [fund(1, 'Shared', true), fund(2, 'Private', false)],
+        currentReservedCents: 0,
+        days: [],
+      }),
+    };
+    const duplicateReviewService = {
+      getReportingSummary: async () => ({
+        window: { startDate: '2026-07-16', endDate: '2026-08-14' },
+        needsReview: 1,
+        confidenceCounts: { high: 1, medium: 0, low: 0 },
+        candidates: [{ id: '1:2', confidence: 'high' }],
+      }),
     };
     const service = new FinancialAnalyticsService({
       lunchMoney,
       fundRepository: {},
       fundService,
+      duplicateReviewService,
     });
 
     const result = await service.getOverview('plaid:1', '2026-08-14');
@@ -44,13 +63,30 @@ describe('FinancialAnalyticsService', () => {
     expect(result.needsAttention.dueWithin48Hours).toHaveLength(1);
     expect(result.spendingTrends.topCategories[0]).toMatchObject({ categoryName: 'Groceries', amountCents: 5000 });
     expect(result.unallocatedSpending.totalCents).toBe(5000);
-    expect(result.funds).toEqual([]);
+    expect(result.funds.map(fundItem => fundItem.name)).toEqual(['Shared']);
 
-    const dailyHighlight = await service.getDailyHighlight('plaid:1', '2026-08-14');
-    expect(dailyHighlight).toMatchObject({
-      schemaVersion: '1.0',
-      reportDate: '2026-08-14',
-      account: { key: 'plaid:1', name: 'Checking' },
+    const dailyHighlight = await service.getDailyHighlight('plaid:1', '2026-08-14', {
+      view: 'admin', timezone: 'America/Chicago', currency: 'USD',
     });
+    expect(dailyHighlight).toMatchObject({
+      schemaVersion: '1.2',
+      reportDate: '2026-08-14',
+      reportContext: {
+        view: 'admin', timezone: 'America/Chicago', currency: 'USD', projectionHorizonDays: 184,
+      },
+      account: { key: 'plaid:1', name: 'Checking' },
+      duplicateReview: {
+        needsReview: 1,
+        confidenceCounts: { high: 1, medium: 0, low: 0 },
+      },
+    });
+    expect(dailyHighlight.funds.map(fundItem => fundItem.name)).toEqual(['Shared', 'Private']);
+
+    const householdHighlight = await service.getDailyHighlight('plaid:1', '2026-08-14', {
+      view: 'household', timezone: 'America/Chicago', currency: 'USD',
+    });
+    expect(householdHighlight.reportContext.view).toBe('household');
+    expect(householdHighlight.funds.map(fundItem => fundItem.name)).toEqual(['Shared']);
+    expect(householdHighlight).not.toHaveProperty('duplicateReview');
   });
 });

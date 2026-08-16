@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  householdFundCards, summarizeCashPosition, summarizeRecurringAttention,
+  fundCards, householdFundCards, summarizeCashPosition, summarizeRecurringAttention,
   summarizeSpendingTrends, summarizeUnallocatedSpending,
 } from './financialAnalytics.js';
 
@@ -38,6 +38,12 @@ describe('Financial analytics', () => {
     expect(result.thirtyDayLow).toMatchObject({ date: '2026-08-20', availableCents: 70000 });
     expect(result.ninetyDayLow).toMatchObject({ date: '2026-09-20', availableCents: 50000 });
     expect(result.sixMonthSnapshot).toMatchObject({ date: '2027-02-14', availableCents: 160000 });
+    expect(result.sixMonthLow).toMatchObject({ date: '2026-09-20', availableCents: 50000 });
+    expect(result.sixMonthHigh).toMatchObject({ date: '2027-02-14', availableCents: 160000 });
+    expect(result.endingAvailable).toMatchObject({ date: '2027-02-14', availableCents: 160000 });
+    expect(result.netAvailableChange).toEqual({
+      startDate: '2026-08-14', endDate: '2027-02-14', amountCents: 60000,
+    });
     expect(result.projectionSeries).toEqual([
       { date: '2026-08-14', availableCents: 100000, ledgerBalanceCents: 120000, reservedFundCents: 20000 },
       { date: '2026-08-20', availableCents: 70000, ledgerBalanceCents: 90000, reservedFundCents: 20000 },
@@ -65,6 +71,15 @@ describe('Financial analytics', () => {
     expect(result.pastDueRecurring.map(item => item.id)).toEqual(['past']);
     expect(result.dueWithin48Hours.map(item => item.id)).toEqual(['unmatched-today', 'two-days']);
     expect(result.dueWithin48Hours.map(item => item.status)).toEqual(['expected', 'missing']);
+    expect(result.pastDueRecurring[0]).toMatchObject({
+      daysPastDue: 2, daysUntilDue: null, urgency: 'past_due',
+    });
+    expect(result.dueWithin48Hours[0]).toMatchObject({
+      daysPastDue: null, daysUntilDue: 0, urgency: 'due_today',
+    });
+    expect(result.dueWithin48Hours[1]).toMatchObject({
+      daysPastDue: null, daysUntilDue: 2, urgency: 'due_48h',
+    });
   });
 
   it('calculates top categories and named 30-day spending trends', () => {
@@ -113,7 +128,13 @@ describe('Financial analytics', () => {
       { id: 2, name: 'Private', householdVisible: false, remainingCents: 50000 },
     ]);
     expect(result).toHaveLength(1);
-    expect(result[0]).toMatchObject({ name: 'Groceries', remainingCents: 10000 });
+    expect(result[0]).toMatchObject({
+      name: 'Groceries', remainingCents: 10000, householdVisible: true,
+    });
     expect(result[0]).not.toHaveProperty('transactions');
+    expect(fundCards([
+      { id: 1, name: 'Shared', householdVisible: true },
+      { id: 2, name: 'Private', householdVisible: false },
+    ], 'admin').map(fund => fund.name)).toEqual(['Shared', 'Private']);
   });
 });

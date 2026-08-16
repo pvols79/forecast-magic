@@ -1,11 +1,12 @@
 import { applyOperationalFunds } from '../../src/availableToSpend.js';
 import { projectCashFlow } from '../../src/projection.js';
 import {
-  householdFundCards, summarizeCashPosition, summarizeRecurringAttention,
+  fundCards, summarizeCashPosition, summarizeRecurringAttention,
   summarizeSpendingTrends, summarizeUnallocatedSpending,
 } from '../domain/financialAnalytics.js';
 import { addDays } from '../domain/periods.js';
 import { OperationalFundRepository } from '../repositories/operationalFundRepository.js';
+import { DuplicateReviewService } from './duplicateReviewService.js';
 import { LunchMoneyService } from './lunchMoneyService.js';
 import { OperationalFundService } from './operationalFundService.js';
 
@@ -21,14 +22,17 @@ const recurringLookback = dateString => {
   return new Date(Date.UTC(year, month - 4, 1)).toISOString().slice(0, 10);
 };
 
+const normalizeView = view => view === 'household' ? 'household' : 'admin';
+
 export class FinancialAnalyticsService {
-  constructor({ lunchMoney, fundRepository, fundService } = {}) {
+  constructor({ lunchMoney, fundRepository, fundService, duplicateReviewService } = {}) {
     this.lunchMoney = lunchMoney || new LunchMoneyService();
     this.fundRepository = fundRepository || new OperationalFundRepository();
     this.fundService = fundService || new OperationalFundService(this.fundRepository, this.lunchMoney);
+    this.duplicateReviewService = duplicateReviewService || new DuplicateReviewService(this.lunchMoney);
   }
 
-  async getOverview(accountKey, anchorDate) {
+  async getOverview(accountKey, anchorDate, { view = 'household' } = {}) {
     if (!accountKey) {
       const error = new Error('Account key is required.');
       error.status = 400;
@@ -89,15 +93,36 @@ export class FinancialAnalyticsService {
         accountKey,
         anchorDate
       ),
-      funds: householdFundCards(currentFunds),
+      funds: fundCards(currentFunds, normalizeView(view)),
     };
   }
 
-  async getDailyHighlight(accountKey, anchorDate) {
-    return {
-      schemaVersion: '1.0',
+  async buildDailyHighlightReport(accountKey, anchorDate, context = {}) {
+    const view = normalizeView(context.view);
+    const overviewPromise = this.getOverview(accountKey, anchorDate, { view });
+    const [overview, duplicateReview] = view === 'admin'
+      ? await Promise.all([
+        overviewPromise,
+        this.duplicateReviewService.getReportingSummary(accountKey, anchorDate),
+      ])
+      : [await overviewPromise, null];
+    const projectionHorizonDays = Math.max(0, overview.cashPosition.projectionSeries.length - 1);
+    const report = {
+      schemaVersion: '1.2',
       reportDate: anchorDate,
-      ...await this.getOverview(accountKey, anchorDate),
+      reportContext: {
+        view,
+        timezone: context.timezone || 'UTC',
+        currency: context.currency || 'USD',
+        projectionHorizonDays,
+      },
+      ...overview,
     };
+    if (view === 'admin') report.duplicateReview = duplicateReview;
+    return report;
+  }
+
+  async getDailyHighlight(accountKey, anchorDate, context = {}) {
+    return this.buildDailyHighlightReport(accountKey, anchorDate, context);
   }
 }

@@ -3,6 +3,7 @@ import express from 'express';
 import { attachAdminStatus } from './auth.js';
 import { config } from './config.js';
 import { createAuthRouter } from './routes/authRoutes.js';
+import { createDuplicateReviewRouter } from './routes/duplicateReviewRoutes.js';
 import { createFinancialAnalyticsRouter } from './routes/financialAnalyticsRoutes.js';
 import { createLunchMoneyRouter } from './routes/lunchMoneyRoutes.js';
 import { createOperationalFundRouter } from './routes/operationalFundRoutes.js';
@@ -17,6 +18,7 @@ export const createApp = () => {
 
   app.get('/api/health', (request, response) => response.json({ status: 'ok' }));
   app.use('/api/auth', createAuthRouter());
+  app.use('/api/duplicate-review', createDuplicateReviewRouter());
   app.use('/api/analytics', createFinancialAnalyticsRouter());
   app.use('/api/reporting', createReportingRouter());
   app.use('/api/settings', createSettingsRouter());

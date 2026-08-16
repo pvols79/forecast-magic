@@ -1,6 +1,6 @@
 # Reporting Readiness Audit
 
-This audit covers the structured data required by the Daily Financial Highlight specification. No report UI is implemented. Reusable calculations live in `server/domain/financialAnalytics.js`, orchestration lives in `server/services/financialAnalyticsService.js`, and the browser/server API contract is:
+This audit covers the structured data required by the Daily Financial Highlight specification. Reusable calculations live in `server/domain/financialAnalytics.js`, orchestration lives in `server/services/financialAnalyticsService.js`, and the browser/server API contract is:
 
 ```text
 GET /api/analytics/overview?accountKey=plaid:123&anchorDate=2026-08-14
@@ -8,7 +8,7 @@ GET /api/analytics/overview?accountKey=plaid:123&anchorDate=2026-08-14
 
 `anchorDate` is optional. When omitted, the installation timezone determines today. Currency values are returned as integer cents.
 
-The token-protected automation contract is `GET /api/reporting/daily-highlight`. It reuses these calculations and adds a schema version, report date, and complete six-month daily projection series. See `docs/reporting_api.md`.
+The token-protected automation contract is `GET /api/reporting/daily-highlight`. It reuses these calculations and adds a schema version, report context, urgency metadata, projection summaries, and complete six-month daily projection series. The application also streams an ad hoc PDF from the same report model. See `docs/reporting_api.md`.
 
 ## Metric Matrix
 

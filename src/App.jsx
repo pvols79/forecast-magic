@@ -17,6 +17,8 @@ import HouseholdFundSummaries from './components/HouseholdFundSummaries';
 import ViewModeControl from './components/ViewModeControl';
 import BrandMark from './components/BrandMark';
 import OperationalFundsManager from './components/operational-funds/OperationalFundsManager';
+import DuplicateReview from './components/DuplicateReview';
+import ShareReportButton from './components/ShareReportButton';
 import { getAccounts, getRecurringItems, getPlaidAccounts, getTransactions } from './lunchmoney';
 import { projectCashFlow } from './projection';
 import { applyOperationalFunds } from './availableToSpend';
@@ -144,6 +146,25 @@ function App() {
     }
   };
 
+  const handleRefresh = async () => {
+    if (!settings?.apiKeyConfigured) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const [manualAccounts, plaidAccounts] = await Promise.all([getAccounts(), getPlaidAccounts()]);
+      const allAccounts = [...manualAccounts, ...plaidAccounts];
+      const selectedStillExists = allAccounts.some(account => account.key === selectedAccountId);
+      setAccounts(allAccounts);
+      setSelectedAccountId(selectedStillExists ? selectedAccountId : allAccounts[0]?.key || null);
+      setFundRefresh(value => value + 1);
+    } catch (refreshError) {
+      setError(`Error refreshing data from Lunch Money. ${getApiErrorMessage(refreshError)}`);
+      throw refreshError;
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleLogin = async password => {
     try {
       await loginAdmin(password);
@@ -214,6 +235,12 @@ function App() {
             <Heading as="h1" size="md">Forecast Magic</Heading>
           </Flex>
           <HStack spacing={2}>
+            {selectedAccountId && settings?.apiKeyConfigured && (
+              <ShareReportButton
+                accountKey={selectedAccountId}
+                view={isAdminView && authStatus?.isAdmin ? 'admin' : 'household'}
+              />
+            )}
             <ViewModeControl
               authStatus={authStatus}
               isAdminView={isAdminView}
@@ -270,6 +297,9 @@ function App() {
               <VStack spacing={4} w="100%" align="stretch">
                 {isAdminView && authStatus?.isAdmin && selectedAccount && (
                   <AdminMetrics openingBalance={projection.openingBalance} />
+                )}
+                {isAdminView && authStatus?.isAdmin && selectedAccount && (
+                  <DuplicateReview accountKey={selectedAccountId} onRefresh={handleRefresh} />
                 )}
                 <Box bg={panelBg} borderRadius="md" borderWidth="1px" boxShadow="sm" overflow="hidden">
                   <Box px={{ base: 4, lg: 5 }} pt={4}>

@@ -24,6 +24,7 @@
     "framer-motion": "^12.23.3",
     "next-themes": "^0.4.6",
     "node": "^22.17.0",
+    "pdfkit": "^0.17.2",
     "react": "^18.2.0",
     "react-chartjs-2": "^5.3.0",
     "react-dom": "^18.2.0",
