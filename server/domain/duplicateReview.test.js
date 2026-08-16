@@ -28,6 +28,20 @@ describe('duplicate transaction detection', () => {
     expect(candidates[0]).toMatchObject({ confidence: 'high', reasons: expect.arrayContaining(['Exact amount', 'Similar payee']) });
   });
 
+  it('treats an API-created transaction as user-entered for duplicate review', () => {
+    const candidates = scan([
+      transaction({ id: 1, source: 'api', payee: 'Walmart', amount: '50.4200' }),
+      transaction({ id: 2, source: 'plaid', payee: 'Walmart', amount: '50.4200' }),
+    ]);
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0]).toMatchObject({
+      confidence: 'high',
+      reasons: expect.arrayContaining(['API-created plus imported']),
+      manual: { id: '1', source: 'api', origin: 'manual' },
+      imported: { id: '2', source: 'plaid', origin: 'imported' },
+    });
+  });
+
   it('classifies an exact-amount nearby-date pair with weak payee similarity as medium', () => {
     const candidates = scan([
       transaction({ id: 1, source: 'manual', payee: 'Family music plan', category_id: null }),

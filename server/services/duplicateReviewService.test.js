@@ -21,8 +21,8 @@ const fingerprints = (manualRaw, importedRaw) => ({
   importedFingerprint: transactionFingerprint(normalizeReviewTransaction(importedRaw)),
 });
 
-const setup = ({ updateError, deleteError } = {}) => {
-  const manual = raw({ id: 1, source: 'manual' });
+const setup = ({ updateError, deleteError, manualSource = 'manual' } = {}) => {
+  const manual = raw({ id: 1, source: manualSource });
   const imported = raw({
     id: 2, source: 'plaid', date: '2026-08-15', payee: 'SPOTIFY USA',
     category_id: 11, notes: 'Imported note', tag_ids: [2],
@@ -80,6 +80,23 @@ describe('DuplicateReviewService', () => {
     expect(calls[0][2]).not.toHaveProperty('date');
     expect(calls[0][2]).not.toHaveProperty('amount');
     expect(result).toMatchObject({ keptTransactionId: '2', deletedTransactionId: '1' });
+  });
+
+  it('detects and safely resolves an API-created transaction paired with an imported transaction', async () => {
+    const { service, manual, imported, calls } = setup({ manualSource: 'api' });
+    const scan = await service.scan('plaid:1', { anchorDate: '2026-08-15' });
+    expect(scan.candidates).toHaveLength(1);
+    expect(scan.candidates[0]).toMatchObject({
+      confidence: 'medium',
+      manual: { source: 'api', origin: 'manual' },
+      imported: { source: 'plaid', origin: 'imported' },
+    });
+
+    await service.resolve({
+      accountKey: 'plaid:1', manualTransactionId: '1', importedTransactionId: '2',
+      ...fingerprints(manual, imported),
+    });
+    expect(calls.map(call => call.slice(0, 2))).toEqual([['update', '2'], ['delete', '1']]);
   });
 
   it('does not delete the manual transaction when the metadata update fails', async () => {

@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-const MANUAL_SOURCE = 'manual';
+const USER_ENTERED_SOURCES = new Set(['manual', 'api']);
 const IMPORTED_SOURCE = 'plaid';
 
 const asId = value => value == null ? null : String(value);
@@ -80,7 +80,9 @@ export const normalizeReviewTransaction = (transaction, categoryNames = new Map(
     recurringId: transaction.recurring_id == null ? null : asId(transaction.recurring_id),
     recurringName: transaction.recurring_id == null ? null : `Recurring #${transaction.recurring_id}`,
     source,
-    origin: source === MANUAL_SOURCE ? 'manual' : source === IMPORTED_SOURCE ? 'imported' : 'other',
+    // Lunch Money labels entries created through its API as "api". They are
+    // user-authored candidates for the same manual-versus-imported workflow.
+    origin: USER_ENTERED_SOURCES.has(source) ? 'manual' : source === IMPORTED_SOURCE ? 'imported' : 'other',
     isPending: Boolean(transaction.is_pending),
     updatedAt: transaction.updated_at || null,
   };
@@ -125,7 +127,10 @@ const scorePair = (manual, imported) => {
   else if (daysApart <= 2 || similarity >= 0.35 || sameCategory || sameRecurring) confidence = 'medium';
   else confidence = 'low';
 
-  const reasons = ['Exact amount', 'Manual plus imported'];
+  const reasons = [
+    'Exact amount',
+    manual.source === 'api' ? 'API-created plus imported' : 'Manual plus imported',
+  ];
   reasons.push(daysApart === 0 ? 'Same date' : `${daysApart}-day date difference`);
   if (similarity >= 0.55) reasons.push('Similar payee');
   if (sameCategory) reasons.push('Same category');
