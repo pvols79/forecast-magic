@@ -18,11 +18,16 @@ import FundTransactionsModal from './FundTransactionsModal';
 const typeLabel = fund => ({ operating: 'Operating', reserved: 'Reserved', sinking: 'Sinking' })[fund.fundType] || 'Operating';
 const typeColor = fund => ({ operating: 'blue', reserved: 'purple', sinking: 'green' })[fund.fundType] || 'blue';
 const capitalize = value => `${value[0].toUpperCase()}${value.slice(1)}`;
+const weekdays = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const periodLabel = fund => {
   if (fund.fundType === 'reserved') return 'All-time reservation';
   if (fund.fundType === 'sinking' && fund.allocationMode === 'manual') return 'Manual balance';
-  if (fund.fundType === 'sinking') return `${capitalize(fund.periodType)} auto allocation / full rollover`;
-  return `${capitalize(fund.periodType)} auto allocation / ${fund.rolloverMode} rollover`;
+  const schedule = fund.periodType === 'weekly'
+    ? `${capitalize(fund.periodType)} auto allocation / ${weekdays[fund.weeklyStartDay ?? 1]} start`
+    : `${capitalize(fund.periodType)} auto allocation`;
+  if (fund.fundType === 'sinking') return `${schedule} / full rollover`;
+  const rollover = fund.rolloverMode === 'none' ? 'no rollover' : `${fund.rolloverMode} rollover`;
+  return `${schedule} / ${rollover}`;
 };
 
 const OperationalFundsManager = ({ accountKey, currentStates, onChanged }) => {

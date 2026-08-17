@@ -111,6 +111,11 @@ const CashFlowChart = ({ data, keyEvents, projectionDays = [], openingBalance, s
         display: false, // Hide default title, use Chakra Heading instead
       },
       tooltip: {
+        bodyFont: { size: 11, lineHeight: 1.15 },
+        titleFont: { size: 12 },
+        bodySpacing: 1,
+        boxPadding: 2,
+        padding: 8,
         callbacks: {
           title: function(context) {
             return context[0].label;
@@ -127,9 +132,10 @@ const CashFlowChart = ({ data, keyEvents, projectionDays = [], openingBalance, s
           },
           afterLabel: function(context) {
             const date = context.label;
+            const dataIndex = context.dataIndex;
             const transactionsForDate = keyEvents.filter(event => event.date === date && !event.is_subtotal);
             const projectionDay = projectionDays.find(day => day.date === date);
-            const operationalFunds = projectionDay?.operationalFunds || [];
+            const previousProjectionDay = dataIndex > 0 ? projectionDays[dataIndex - 1] : null;
             const boundaryAnnotations = projectionDay?.operationalFundAnnotations || [];
             const details = [];
             if (showOpeningDetails && openingBalance?.date === date) {
@@ -152,38 +158,44 @@ const CashFlowChart = ({ data, keyEvents, projectionDays = [], openingBalance, s
               details.push(`Fund Allocations reserved: -${formatCurrency(openingBalance.reservedOperationalFunds)}`);
               details.push(`Available to Spend: ${formatCurrency(openingBalance.availableToSpend)}`);
             }
+            if (dataIndex > 0) {
+              const previousAvailable = Number(context.dataset.data[dataIndex - 1]);
+              const accountActivity = transactionsForDate.reduce(
+                (sum, event) => sum + Number(event.amount || 0),
+                0
+              );
+              const previousReserved = Number(previousProjectionDay?.reservedOperationalFunds || 0);
+              const currentReserved = Number(projectionDay?.reservedOperationalFunds || 0);
+              const fundImpact = previousReserved - currentReserved;
+              if (accountActivity !== 0 || fundImpact !== 0) {
+                details.push('Daily Reconciliation');
+                details.push(`Previous available: ${formatCurrency(previousAvailable)}`);
+                details.push(`Account activity: ${formatEventAmount({ amount: accountActivity })}`);
+                details.push(`Fund Allocation impact: ${formatEventAmount({ amount: fundImpact })}`);
+              }
+            }
+            if (boundaryAnnotations.length > 0) {
+              details.push('Period Changes');
+              boundaryAnnotations.forEach(annotation => {
+                const change = `${annotation.name}: ${formatCurrency(annotation.allocationCents / 100)} newly reserved`;
+                const rollover = annotation.carryInCents > 0
+                  ? `; ${formatCurrency(annotation.carryInCents / 100)} rolled forward`
+                  : '';
+                details.push(`${change}${rollover}`);
+              });
+            }
             transactionSections.forEach(section => {
               const matchingEvents = transactionsForDate.filter(event => section.types.includes(event.type));
               if (matchingEvents.length === 0) return;
-              details.push('', section.title);
+              details.push(section.title);
               matchingEvents.forEach(event => details.push(`${event.description}: ${formatEventAmount(event)}`));
             });
             const uncategorizedEvents = transactionsForDate.filter(event =>
               !transactionSections.some(section => section.types.includes(event.type))
             );
             if (uncategorizedEvents.length > 0) {
-              details.push('', 'Account Activity');
+              details.push('Account Activity');
               uncategorizedEvents.forEach(event => details.push(`${event.description}: ${formatEventAmount(event)}`));
-            }
-            if (operationalFunds.length > 0) {
-              details.push('', 'Fund Allocations');
-              operationalFunds.forEach(fund => {
-                details.push(`${fund.name}: ${formatCurrency(fund.remainingCents / 100)} remaining this period`);
-                if (fund.projectedReserveCents !== fund.remainingCents) {
-                  details.push(`${formatCurrency(fund.projectedReserveCents / 100)} committed through this date`);
-                }
-              });
-            }
-            if (boundaryAnnotations.length > 0) {
-              details.push('', 'Period Changes');
-              boundaryAnnotations.forEach(annotation => {
-                details.push(`${annotation.name}: ${formatCurrency(annotation.allocationCents / 100)} new allocation`);
-                if (annotation.carryInCents > 0) details.push(`${formatCurrency(annotation.carryInCents / 100)} rolled forward`);
-                details.push(`${formatCurrency(annotation.resultingRemainingCents / 100)} available for this period`);
-                if (annotation.projectedReserveCents !== annotation.resultingRemainingCents) {
-                  details.push(`${formatCurrency(annotation.projectedReserveCents / 100)} committed through this date`);
-                }
-              });
             }
             return details;
           }
