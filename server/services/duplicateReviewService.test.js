@@ -99,6 +99,23 @@ describe('DuplicateReviewService', () => {
     expect(calls.map(call => call.slice(0, 2))).toEqual([['update', '2'], ['delete', '1']]);
   });
 
+  it('detects and safely resolves a recurring-created transaction paired with an imported transaction', async () => {
+    const { service, manual, imported, calls } = setup({ manualSource: 'recurring' });
+    const scan = await service.scan('plaid:1', { anchorDate: '2026-08-15' });
+    expect(scan.candidates).toHaveLength(1);
+    expect(scan.candidates[0]).toMatchObject({
+      confidence: 'medium',
+      manual: { source: 'recurring', origin: 'manual' },
+      imported: { source: 'plaid', origin: 'imported' },
+    });
+
+    await service.resolve({
+      accountKey: 'plaid:1', manualTransactionId: '1', importedTransactionId: '2',
+      ...fingerprints(manual, imported),
+    });
+    expect(calls.map(call => call.slice(0, 2))).toEqual([['update', '2'], ['delete', '1']]);
+  });
+
   it('does not delete the manual transaction when the metadata update fails', async () => {
     const { service, manual, imported, calls } = setup({ updateError: new Error('Update failed') });
     await expect(service.resolve({

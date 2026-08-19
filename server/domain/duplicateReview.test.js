@@ -42,6 +42,38 @@ describe('duplicate transaction detection', () => {
     });
   });
 
+  it('treats a recurring-created transaction as user-entered for duplicate review', () => {
+    const candidates = scan([
+      transaction({
+        id: 1,
+        source: 'recurring',
+        payee: 'Rocket Mortgage',
+        amount: '2043.7900',
+        recurring_id: 3147769,
+      }),
+      transaction({
+        id: 2,
+        source: 'plaid',
+        payee: 'Rocket Mortgage',
+        amount: '2043.7900',
+        date: '2026-08-17',
+        recurring_id: 3147769,
+      }),
+    ]);
+
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0]).toMatchObject({
+      confidence: 'medium',
+      reasons: expect.arrayContaining([
+        'Recurring-created plus imported',
+        '3-day date difference',
+        'Same recurring item',
+      ]),
+      manual: { id: '1', source: 'recurring', origin: 'manual' },
+      imported: { id: '2', source: 'plaid', origin: 'imported' },
+    });
+  });
+
   it('classifies an exact-amount nearby-date pair with weak payee similarity as medium', () => {
     const candidates = scan([
       transaction({ id: 1, source: 'manual', payee: 'Family music plan', category_id: null }),
