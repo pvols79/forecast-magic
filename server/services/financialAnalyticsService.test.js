@@ -24,6 +24,10 @@ describe('FinancialAnalyticsService', () => {
           id: 'recurring-occurrence:2:2026-08-15', recurringId: 2, accountKey: 'plaid:1',
           date: '2026-08-15', description: 'Bill', amount: -100,
           type: 'recurring-occurrence', status: 'missing',
+        }, {
+          id: 'recurring-occurrence:3:2026-08-15', recurringId: 3, accountKey: 'plaid:1',
+          date: '2026-08-15', description: 'Already paid', amount: -200,
+          type: 'recurring-occurrence', status: 'expected',
         }],
       }),
     };
@@ -61,6 +65,7 @@ describe('FinancialAnalyticsService', () => {
     expect(result.cashPosition.sixMonthSnapshot.date).toBe('2027-02-14');
     expect(result.cashPosition.projectionSeries.at(-1).date).toBe('2027-02-14');
     expect(result.needsAttention.dueWithin48Hours).toHaveLength(1);
+    expect(result.needsAttention.dueWithin48Hours[0].description).toBe('Bill');
     expect(result.spendingTrends.topCategories[0]).toMatchObject({ categoryName: 'Groceries', amountCents: 5000 });
     expect(result.unallocatedSpending.totalCents).toBe(5000);
     expect(result.funds.map(fundItem => fundItem.name)).toEqual(['Shared']);

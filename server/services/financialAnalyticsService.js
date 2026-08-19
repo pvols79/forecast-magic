@@ -1,7 +1,8 @@
 import { applyOperationalFunds } from '../../src/availableToSpend.js';
 import { projectCashFlow } from '../../src/projection.js';
+import { selectUpcomingEvents } from '../../src/upcomingEvents.js';
 import {
-  fundCards, summarizeCashPosition, summarizeRecurringAttention,
+  fundCards, summarizeCashPosition, summarizeUpcomingAttention,
   summarizeSpendingTrends, summarizeUnallocatedSpending,
 } from '../domain/financialAnalytics.js';
 import { addDays } from '../domain/periods.js';
@@ -74,6 +75,11 @@ export class FinancialAnalyticsService {
     );
     const projection = applyOperationalFunds(ledgerProjection, fundProjection);
     const currentFunds = fundProjection.currentFunds || [];
+    const upcomingEvents = selectUpcomingEvents(
+      ledgerProjection.keyEvents,
+      ledgerProjection.historicalMissedEvents,
+      anchorDate
+    );
 
     return {
       generatedAt: new Date().toISOString(),
@@ -84,7 +90,7 @@ export class FinancialAnalyticsService {
         name: account.name,
       },
       cashPosition: summarizeCashPosition(projection, anchorDate),
-      needsAttention: summarizeRecurringAttention(recurringEvents, recurringData.occurrences, accountKey, anchorDate),
+      needsAttention: summarizeUpcomingAttention(upcomingEvents, anchorDate),
       spendingTrends: summarizeSpendingTrends(transactions, categories, accountKey, anchorDate),
       unallocatedSpending: summarizeUnallocatedSpending(
         transactions,

@@ -183,7 +183,7 @@ const drawNeedsAttention = (doc, report, context) => {
   ];
   if (!items.length) {
     doc.fillColor(COLORS.muted).font('Helvetica').fontSize(9)
-      .text('No unmatched recurring expenses are past due or due within 48 hours.', doc.page.margins.left, doc.y, { width: context.contentWidth });
+      .text('No unpaid Upcoming expenses are past due or due within 48 hours.', doc.page.margins.left, doc.y, { width: context.contentWidth });
     return;
   }
   drawAttentionRows(doc, items, context);

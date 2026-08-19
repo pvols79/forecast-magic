@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  fundCards, householdFundCards, summarizeCashPosition, summarizeRecurringAttention,
+  fundCards, householdFundCards, summarizeCashPosition, summarizeUpcomingAttention,
   summarizeSpendingTrends, summarizeUnallocatedSpending,
 } from './financialAnalytics.js';
 
@@ -52,32 +52,29 @@ describe('Financial analytics', () => {
     ]);
   });
 
-  it('separates past-due recurring occurrences from those due within 48 hours', () => {
+  it('separates past-due Upcoming expenses from those due within 48 hours', () => {
     const event = (date, id) => ({
       id, recurringId: 10, accountKey: 'plaid:1', date,
       description: 'Bill', amount: -50, type: 'recurring-projected',
     });
-    const result = summarizeRecurringAttention([
-      event('2026-08-12', 'past'),
-    ], [
-      { ...event('2026-08-14', 'matched-today'), type: 'recurring-occurrence', status: 'matched', transactionId: 100 },
-      { ...event('2026-08-14', 'unmatched-today'), type: 'recurring-occurrence', status: 'expected' },
-      { ...event('2026-08-16', 'two-days'), type: 'recurring-occurrence', status: 'missing' },
-      { ...event('2026-08-17', 'later'), type: 'recurring-occurrence', status: 'expected' },
-      { ...event('2026-08-15', 'income'), type: 'recurring-occurrence', amount: 500, status: 'expected' },
-      { ...event('2026-08-15', 'other-account'), type: 'recurring-occurrence', accountKey: 'plaid:2' },
-    ], 'plaid:1', '2026-08-14');
+    const result = summarizeUpcomingAttention([
+      { ...event('2026-08-12', 'past'), is_historical_missed: true },
+      { ...event('2026-08-14', 'unmatched-today'), is_historical_missed: true },
+      event('2026-08-16', 'two-days'),
+      { ...event('2026-08-15', 'pending'), type: 'pending' },
+      event('2026-08-17', 'later'),
+      { ...event('2026-08-15', 'income'), amount: 500 },
+    ], '2026-08-14');
 
     expect(result.pastDueRecurring.map(item => item.id)).toEqual(['past']);
-    expect(result.dueWithin48Hours.map(item => item.id)).toEqual(['unmatched-today', 'two-days']);
-    expect(result.dueWithin48Hours.map(item => item.status)).toEqual(['expected', 'missing']);
+    expect(result.dueWithin48Hours.map(item => item.id)).toEqual(['unmatched-today', 'pending', 'two-days']);
     expect(result.pastDueRecurring[0]).toMatchObject({
       daysPastDue: 2, daysUntilDue: null, urgency: 'past_due',
     });
     expect(result.dueWithin48Hours[0]).toMatchObject({
       daysPastDue: null, daysUntilDue: 0, urgency: 'due_today',
     });
-    expect(result.dueWithin48Hours[1]).toMatchObject({
+    expect(result.dueWithin48Hours[2]).toMatchObject({
       daysPastDue: null, daysUntilDue: 2, urgency: 'due_48h',
     });
   });

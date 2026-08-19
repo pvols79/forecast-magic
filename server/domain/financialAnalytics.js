@@ -74,24 +74,20 @@ const attentionEvent = (event, anchorDate) => ({
   ...recurringTiming(event.date, anchorDate),
 });
 
-export const summarizeRecurringAttention = (missingEvents, occurrences, accountKey, anchorDate) => {
+export const summarizeUpcomingAttention = (upcomingEvents, anchorDate) => {
   const dueThrough = addDays(anchorDate, 2);
-  const missing = missingEvents
-    .filter(event => event.accountKey === accountKey && event.type === 'recurring-projected')
-    .sort((left, right) => left.date.localeCompare(right.date) || left.description.localeCompare(right.description));
-  const upcomingExpenses = occurrences
-    .filter(event => event.accountKey === accountKey)
-    .filter(event => event.amount < 0)
-    .filter(event => event.date >= anchorDate && event.date <= dueThrough)
-    .filter(event => event.status !== 'matched')
+  const expenses = upcomingEvents
+    .filter(event => Number(event.amount) < 0)
     .sort((left, right) => left.date.localeCompare(right.date) || left.description.localeCompare(right.description));
   return {
     asOfDate: anchorDate,
     dueThrough,
-    pastDueRecurring: missing
+    pastDueRecurring: expenses
       .filter(event => event.date < anchorDate)
       .map(event => attentionEvent(event, anchorDate)),
-    dueWithin48Hours: upcomingExpenses.map(event => attentionEvent(event, anchorDate)),
+    dueWithin48Hours: expenses
+      .filter(event => event.date >= anchorDate && event.date <= dueThrough)
+      .map(event => attentionEvent(event, anchorDate)),
   };
 };
 

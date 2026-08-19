@@ -5,6 +5,7 @@ import {
 } from '@chakra-ui/react';
 import { FaChevronLeft, FaChevronRight } from 'react-icons/fa';
 import { formatCurrency } from '../utils';
+import { selectUpcomingEvents } from '../upcomingEvents';
 import { differenceInCalendarDays, format, parse } from 'date-fns';
 
 const formatEventDate = (date) => {
@@ -90,17 +91,7 @@ const KeyEventCarousel = ({ events, historicalMissedEvents }) => {
   const visibleCount = useBreakpointValue({ base: 1, sm: 2, md: 3, lg: 5, '2xl': 6 }, { fallback: 'lg' }) || 5;
   const carouselEvents = useMemo(() => {
     const today = getLocalDateString(new Date());
-    const futureEvents = events.filter(event =>
-      event.date > today &&
-      !event.is_subtotal
-    );
-    const missedEvents = (historicalMissedEvents || []).map(event => ({
-      ...event,
-      balance: undefined,
-      is_historical_missed: true,
-    }));
-
-    return [...missedEvents, ...futureEvents].sort((a, b) => new Date(a.date) - new Date(b.date));
+    return selectUpcomingEvents(events, historicalMissedEvents, today);
   }, [events, historicalMissedEvents]);
   const visibleEvents = useMemo(
     () => carouselEvents.slice(startIndex, startIndex + visibleCount),
