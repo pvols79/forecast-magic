@@ -20,7 +20,11 @@ RUN npm ci --omit=dev
 
 COPY --from=build /app/dist ./dist
 COPY server ./server
-COPY --from=build /app/src/availableToSpend.js /app/src/projection.js ./src/
+COPY --from=build \
+  /app/src/availableToSpend.js \
+  /app/src/projection.js \
+  /app/src/upcomingEvents.js \
+  ./src/
 
 RUN mkdir -p /data && chown node:node /data
 
