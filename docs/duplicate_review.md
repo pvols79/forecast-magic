@@ -34,6 +34,8 @@ Selecting **Not Duplicate** stores only the exact manual/imported transaction ID
 
 Selecting **Duplicate** keeps the imported transaction as the bank event. The service re-fetches and revalidates both transactions, updates the imported payee and selected metadata, confirms that update, and only then deletes the manual transaction. An update failure prevents deletion. A deletion failure remains visible as an error and the candidate can be scanned again.
 
+For transactions created early by n8n or another API integration, that deletion also retires the placeholder from cash-flow opening adjustments. Until resolution, the user/API-created transaction continues to affect available cash and an imported match remains visible as a duplicate rather than being silently removed by projection logic.
+
 ## APIs
 
 The Admin session protects all review operations:

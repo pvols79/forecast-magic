@@ -23,6 +23,7 @@ COPY server ./server
 COPY --from=build \
   /app/src/availableToSpend.js \
   /app/src/projection.js \
+  /app/src/transactionBalance.js \
   /app/src/upcomingEvents.js \
   ./src/
 

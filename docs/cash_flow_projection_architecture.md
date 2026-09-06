@@ -32,6 +32,10 @@ Lunch Money transaction amounts are inverted once at this boundary:
 
 Transactions include their Lunch Money `category_id` so the Fund Allocation layer can evaluate mappings without embedding Fund policy into the ledger engine.
 
+The adapter also assigns each transaction a `balanceTreatment`. Imported Plaid transactions are `included` because the synced balance already contains them. Transactions with Lunch Money source `api`, `manual`, or `recurring` on a Plaid account are `unreflected`; when dated on or before the projection anchor, they are applied as opening adjustments. This supports transactions created early by automation without weakening compound account filtering.
+
+An unreflected placeholder remains effective until it is deleted or otherwise removed from Lunch Money. Duplicate Review performs that lifecycle transition by retaining the imported Plaid transaction and deleting the user/API-created placeholder. The projection deliberately does not collapse an unresolved pair.
+
 ## Ledger Projection
 
 `src/projection.js` remains the ledger-event engine. It handles account filtering, pending and future activity, recurring matching, missed recurring obligations, daily closing balances, Key Events, and negative-balance candidates.

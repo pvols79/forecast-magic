@@ -26,3 +26,38 @@ describe('LunchMoneyService recurring schedule normalization', () => {
     ]);
   });
 });
+
+describe('LunchMoneyService transaction balance treatment', () => {
+  it('marks an API-created transaction on a Plaid account as unreflected', () => {
+    const service = new LunchMoneyService();
+    expect(service.normalizeTransaction({
+      id: 90,
+      plaid_account_id: 5,
+      date: '2026-09-05',
+      amount: '82.29',
+      payee: 'Tractor Supply',
+      source: 'api',
+      is_pending: false,
+    }, '2026-09-05')).toMatchObject({
+      accountKey: 'plaid:5',
+      amount: -82.29,
+      type: 'actual',
+      balanceTreatment: 'unreflected',
+    });
+  });
+
+  it('marks an imported Plaid transaction as included in the synced balance', () => {
+    const service = new LunchMoneyService();
+    expect(service.normalizeTransaction({
+      id: 91,
+      plaid_account_id: 5,
+      date: '2026-09-05',
+      amount: '82.29',
+      payee: 'Tractor Supply',
+      source: 'plaid',
+      is_pending: false,
+    }, '2026-09-05')).toMatchObject({
+      balanceTreatment: 'included',
+    });
+  });
+});

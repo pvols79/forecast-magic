@@ -1,4 +1,5 @@
 import { format, lastDayOfMonth } from 'date-fns';
+import { isUnreflectedTransaction } from './transactionBalance.js';
 
 
 
@@ -34,11 +35,14 @@ const removeSatisfiedRecurringProjections = (events) => {
   });
 };
 
-// A transaction created from a recurring item is not reflected in a synced
-// account's current balance, even when its chosen date is today or earlier.
+// User/API-created transactions assigned to synced accounts do not alter the
+// bank-supplied balance. They remain adjustments until their imported match is
+// retained and the placeholder is removed through Duplicate Review.
 const isOpeningAdjustment = (event, anchorDate) =>
   event.date <= anchorDate && (
     event.type === 'recurring-projected'
+    || isUnreflectedTransaction(event)
+    // Compatibility for normalized events produced before balanceTreatment.
     || event.lunchMoneySource === 'recurring'
   );
 
@@ -59,8 +63,14 @@ export const projectCashFlow = (accounts, cashFlowEvents, selectedAccountId, pro
   const selectedApiEvents = cashFlowEvents
     .filter(event => eventAffectsSelectedAccount(event, selectedAccount))
     .filter(event => event.date <= getUTCDateString(projectionEndDate))
-    .filter(event => event.type === 'recurring-projected' || event.lunchMoneySource === 'recurring' || event.date >= anchorDate)
-    .filter(event => event.type !== 'actual' || event.date > anchorDate || event.lunchMoneySource === 'recurring');
+    .filter(event => event.type === 'recurring-projected'
+      || isUnreflectedTransaction(event)
+      || event.lunchMoneySource === 'recurring'
+      || event.date >= anchorDate)
+    .filter(event => event.type !== 'actual'
+      || event.date > anchorDate
+      || isUnreflectedTransaction(event)
+      || event.lunchMoneySource === 'recurring');
 
   const openingAdjustmentEvents = getOpeningAdjustmentEvents(
     selectedApiEvents,

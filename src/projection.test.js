@@ -129,6 +129,56 @@ describe('projectCashFlow', () => {
     expect(balanceOn(projection, '2026-08-11')).toBe(3000);
   });
 
+  it('applies an n8n API placeholder on a Plaid account until Duplicate Review removes it', () => {
+    const projection = projectCashFlow(
+      [checkingAccount],
+      [{
+        id: 'transaction:n8n-purchase',
+        accountKey: 'plaid:1',
+        date: '2026-08-10',
+        description: 'Email-created purchase',
+        amount: -125,
+        type: 'actual',
+        lunchMoneySource: 'api',
+        balanceTreatment: 'unreflected',
+      }],
+      'plaid:1',
+      1,
+      { anchorDate: '2026-08-11' }
+    );
+
+    expect(balanceOn(projection, '2026-08-11')).toBe(2875);
+    expect(projection.openingBalance.adjustmentEvents).toEqual([
+      expect.objectContaining({ description: 'Email-created purchase', amount: -125 }),
+    ]);
+  });
+
+  it('does not silently cancel an unresolved API/imported duplicate pair', () => {
+    const projection = projectCashFlow(
+      [checkingAccount],
+      [
+        {
+          id: 'transaction:n8n-purchase', accountKey: 'plaid:1', date: '2026-08-10',
+          description: 'Walmart', amount: -50.42, type: 'actual', lunchMoneySource: 'api',
+          balanceTreatment: 'unreflected',
+        },
+        {
+          id: 'transaction:plaid-purchase', accountKey: 'plaid:1', date: '2026-08-10',
+          description: 'Walmart', amount: -50.42, type: 'actual', lunchMoneySource: 'plaid',
+          balanceTreatment: 'included',
+        },
+      ],
+      'plaid:1',
+      1,
+      { anchorDate: '2026-08-11' }
+    );
+
+    // The synced balance already contains the imported row. Applying the API
+    // placeholder exposes the unresolved duplicate until the Admin resolves it.
+    expect(balanceOn(projection, '2026-08-11')).toBeCloseTo(2949.58);
+    expect(projection.openingBalance.adjustmentEvents).toHaveLength(1);
+  });
+
   it('reports anchor-date activity separately in the opening reconciliation', () => {
     const projection = projectCashFlow(
       [checkingAccount],

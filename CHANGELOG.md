@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Treat API- and manually created transactions on Plaid accounts as opening adjustments until Duplicate Review replaces them with their imported transaction.
+- Preserve unresolved manual/imported duplicates in the projection so data issues remain visible for review.
+
 ## 0.1.1 - Docker Runtime Fix
 
 - Included the shared projection modules required by the reporting service in the production container image.

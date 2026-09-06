@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { getTransactionBalanceTreatment } from './transactionBalance.js';
 
 const API_URL = '/api/lunch-money';
 
@@ -45,6 +46,8 @@ export const normalizeTransaction = (transaction) => {
   const accountId = transaction.manual_account_id ?? transaction.plaid_account_id;
   if (accountId == null) return null;
 
+  const lunchMoneySource = transaction.source;
+
   return {
     id: `transaction:${transaction.id}`,
     accountId,
@@ -56,7 +59,11 @@ export const normalizeTransaction = (transaction) => {
     type: transaction.is_pending ? 'pending' : (transaction.date > new Date().toISOString().slice(0, 10) ? 'future' : 'actual'),
     transactionId: transaction.id,
     recurringId: transaction.recurring_id,
-    lunchMoneySource: transaction.source,
+    lunchMoneySource,
+    balanceTreatment: getTransactionBalanceTreatment({
+      accountSource: source,
+      lunchMoneySource,
+    }),
     is_pending: Boolean(transaction.is_pending),
   };
 };

@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { getTransactionBalanceTreatment } from '../../src/transactionBalance.js';
 import { config } from '../config.js';
 import { SettingsRepository } from '../repositories/settingsRepository.js';
 
@@ -97,6 +98,7 @@ export class LunchMoneyService {
     const source = transaction.manual_account_id != null ? 'manual' : 'plaid';
     const id = transaction.manual_account_id ?? transaction.plaid_account_id;
     if (id == null) return null;
+    const lunchMoneySource = transaction.source;
     return {
       id: `transaction:${transaction.id}`,
       accountId: id,
@@ -108,7 +110,11 @@ export class LunchMoneyService {
       type: transaction.is_pending ? 'pending' : (transaction.date > anchorDate ? 'future' : 'actual'),
       transactionId: transaction.id,
       recurringId: transaction.recurring_id,
-      lunchMoneySource: transaction.source,
+      lunchMoneySource,
+      balanceTreatment: getTransactionBalanceTreatment({
+        accountSource: source,
+        lunchMoneySource,
+      }),
       categoryId: transaction.category_id,
       isPending: Boolean(transaction.is_pending),
       is_pending: Boolean(transaction.is_pending),
