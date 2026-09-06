@@ -22,9 +22,11 @@ Generate independent secrets:
 ```bash
 openssl rand -hex 32
 openssl rand -hex 32
+openssl rand -hex 32
+openssl rand -hex 32
 ```
 
-Put the first value in `SESSION_SECRET` and the second in `REPORTING_API_TOKEN`. Set a strong `ADMIN_PASSWORD`. `LUNCH_MONEY_API_KEY` may remain blank and be entered through the Admin UI after startup.
+Put the values in `SESSION_SECRET`, `REPORTING_API_TOKEN`, `AUDIT_READ_TOKEN`, and `AUDIT_INGEST_TOKEN`, respectively. Set a strong `ADMIN_PASSWORD`. `LUNCH_MONEY_API_KEY` may remain blank and be entered through the Admin UI after startup.
 
 Never commit `.env`. It is excluded by `.gitignore` and from the Docker build context.
 
@@ -198,6 +200,16 @@ Authorization: Bearer <REPORTING_API_TOKEN>
 ```
 
 Do not place the Lunch Money API key in n8n. The separate reporting token limits automation access to the read-only reporting contract.
+
+n8n can upload Capital One and original email-alert evidence with `AUDIT_INGEST_TOKEN`. Read-only audit retrieval and audit execution use `AUDIT_READ_TOKEN`. Keep these credentials separate: a reporting consumer does not automatically receive financial-audit access, and a conversational MCP client should receive only the read token.
+
+The MCP endpoint is available through the same reverse proxy at:
+
+```text
+https://forecast-magic.example.com/mcp
+```
+
+It uses Streamable HTTP and requires `Authorization: Bearer <AUDIT_READ_TOKEN>`. No additional container port or NGINX location is required when the existing root proxy forwards all paths to Forecast Magic. See [Financial Health Audit](financial_audit.md) before exposing this endpoint outside a private network.
 
 Ad hoc PDF generation uses the pure-JavaScript PDFKit dependency included by `npm ci`. It requires no Chromium package, additional volume, temporary report directory, NGINX location, or certificate change. The existing reverse-proxy timeout and response-size defaults are sufficient for normal personal-finance reports.
 

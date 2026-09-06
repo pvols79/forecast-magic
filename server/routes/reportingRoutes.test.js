@@ -87,6 +87,42 @@ describe('Reporting API', () => {
     }]);
   });
 
+  it('adds the latest compact financial health snapshot when available', async () => {
+    const service = {
+      buildDailyHighlightReport: async () => ({
+        schemaVersion: '1.2', reportDate: '2026-09-05', account: { key: 'plaid:1' },
+      }),
+    };
+    const auditService = {
+      getCompactHealth: accountKey => ({
+        runId: 7,
+        accountKey,
+        status: 'attention',
+        confidenceScore: 84,
+        unexplainedAvailableDifferenceCents: 42517,
+      }),
+    };
+    const router = createReportingRouter(
+      service,
+      { get: () => 'America/Chicago' },
+      (request, response, next) => next(),
+      undefined,
+      auditService
+    );
+    const route = router.stack.find(layer => layer.route?.path === '/daily-highlight').route;
+    let body;
+    await route.stack.at(-1).handle(
+      { query: { accountKey: 'plaid:1', anchorDate: '2026-09-05' } },
+      { json: value => { body = value; } }
+    );
+
+    expect(body.financialHealth).toMatchObject({
+      runId: 7,
+      status: 'attention',
+      unexplainedAvailableDifferenceCents: 42517,
+    });
+  });
+
   it('streams a current Household PDF through the normal application context', async () => {
     const calls = [];
     const service = {

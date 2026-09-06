@@ -74,6 +74,20 @@ The response has this stable top-level shape:
       "low": 0
     },
     "candidates": []
+  },
+  "financialHealth": {
+    "runId": 42,
+    "asOf": "2026-09-06T15:30:00.000Z",
+    "anchorDate": "2026-09-06",
+    "status": "attention",
+    "confidenceScore": 84,
+    "findingCounts": {
+      "critical": 0,
+      "warning": 2,
+      "unknown": 0
+    },
+    "unexplainedAvailableDifferenceCents": -42517,
+    "unknowns": []
   }
 }
 ```
@@ -83,6 +97,8 @@ Currency values, including duplicate candidate `amountCents` fields, use integer
 Needs-attention items include `daysPastDue`, `daysUntilDue`, and exactly one urgency value: `past_due`, `due_today`, `due_48h`, or `upcoming`. Non-applicable timing values are `null`.
 
 Household reports include only Household-visible Fund cards and omit `duplicateReview`. Admin reports include all active selected-account Fund cards and the read-only Duplicate Review summary. Every Fund card includes `householdVisible`. Ignored duplicate pairs are excluded; High- and Medium-confidence candidates are listed, while `confidenceCounts.low` still reports the number of hidden Low-confidence suggestions. The reporting endpoint cannot resolve or ignore candidates.
+
+`financialHealth` contains the latest saved audit summary and is available in both report views. It does not expose the audit credential or raw evidence uploads. When no audit has been completed for the selected account, its status is `not_assessable` with a reason. Report generation does not automatically run a new audit; automation can call `POST /api/financial-audit/runs` first when it requires current evidence. See [Financial Health Audit](financial_audit.md).
 
 ## Ad Hoc PDF
 

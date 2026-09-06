@@ -51,6 +51,31 @@ export const summarizeCashPosition = (projection, anchorDate) => {
   };
 };
 
+export const summarizeOpeningReconciliation = projection => {
+  const opening = projection?.openingBalance;
+  if (!opening) return null;
+  return {
+    date: opening.date,
+    syncedAccountBalanceCents: toCents(opening.syncedAccountBalance),
+    openingAdjustmentCents: toCents(opening.adjustmentTotal),
+    openingAdjustmentCount: opening.adjustmentEvents?.length || 0,
+    openingAdjustments: (opening.adjustmentEvents || []).map(event => ({
+      id: event.id,
+      date: event.date,
+      description: event.description,
+      amountCents: toCents(event.amount),
+      type: event.type,
+      transactionId: event.transactionId,
+      recurringId: event.recurringId,
+    })),
+    adjustedOpeningLedgerCents: toCents(opening.ledgerBalance),
+    todayForecastActivityCents: toCents(opening.anchorDateEventTotal),
+    projectedLedgerTodayCents: toCents(opening.projectedLedgerBalance),
+    fundReservationsCents: toCents(opening.reservedOperationalFunds),
+    availableToSpendCents: toCents(opening.availableToSpend),
+  };
+};
+
 const recurringTiming = (date, anchorDate) => {
   const dayOffset = daysBetween(anchorDate, date);
   if (dayOffset < 0) {

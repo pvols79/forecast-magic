@@ -91,6 +91,8 @@ export class LunchMoneyService {
       display_name: account.display_name || account.name,
       institution: account.institution_name,
       balance: toNumber(account.balance),
+      lastUpdated: account.balance_last_update || account.last_import || account.updated_at || null,
+      status: account.status || null,
     };
   }
 
@@ -226,11 +228,12 @@ export class LunchMoneyService {
       .filter(Boolean);
   }
 
-  async getRawTransactions(startDate, endDate) {
+  async getRawTransactions(startDate, endDate, { includeMetadata = false } = {}) {
     const data = await this.get('/transactions', {
       start_date: startDate,
       end_date: endDate,
       include_pending: true,
+      ...(includeMetadata ? { include_metadata: true } : {}),
     });
     // Default v2 behavior omits split parents and grouped children, preventing double-counting.
     return unwrapList(data, 'transactions');

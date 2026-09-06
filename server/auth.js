@@ -42,24 +42,43 @@ export const requireAdmin = (request, response, next) => {
 };
 
 const tokensMatch = (provided, expected) => {
-  const providedDigest = crypto.createHash('sha256').update(provided).digest();
-  const expectedDigest = crypto.createHash('sha256').update(expected).digest();
+  const providedDigest = crypto.createHash('sha256').update(String(provided || '')).digest();
+  const expectedDigest = crypto.createHash('sha256').update(String(expected || '')).digest();
   return crypto.timingSafeEqual(providedDigest, expectedDigest);
 };
 
-export const createRequireReportingToken = expectedToken => (request, response, next) => {
+export const createRequireBearerToken = (
+  expectedToken,
+  { configurationName = 'API', allowAdmin = false } = {}
+) => (request, response, next) => {
+  if (allowAdmin && config.adminPassword && request.isAdmin) return next();
   if (!expectedToken) {
-    return response.status(503).json({ error: 'Reporting API access is not configured.' });
+    return response.status(503).json({ error: `${configurationName} access is not configured.` });
   }
   const match = /^Bearer\s+(.+)$/i.exec(request.headers.authorization || '');
   if (!match || !tokensMatch(match[1], expectedToken)) {
     response.set('WWW-Authenticate', 'Bearer');
-    return response.status(401).json({ error: 'A valid reporting API token is required.' });
+    return response.status(401).json({ error: `A valid ${configurationName.toLowerCase()} token is required.` });
   }
   return next();
 };
 
+export const createRequireReportingToken = expectedToken => createRequireBearerToken(expectedToken, {
+  configurationName: 'Reporting API',
+});
+
 export const requireReportingToken = createRequireReportingToken(config.reportingApiToken);
+export const requireAuditRead = createRequireBearerToken(config.auditReadToken, {
+  configurationName: 'Audit read API',
+  allowAdmin: true,
+});
+export const requireAuditIngest = createRequireBearerToken(config.auditIngestToken, {
+  configurationName: 'Audit ingest API',
+  allowAdmin: true,
+});
+export const requireMcpAuditRead = createRequireBearerToken(config.auditReadToken, {
+  configurationName: 'MCP audit API',
+});
 
 export const login = (request, response) => {
   if (!config.adminPassword || request.body?.password === config.adminPassword) {

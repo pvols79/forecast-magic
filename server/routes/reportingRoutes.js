@@ -28,14 +28,33 @@ export const createReportingRouter = (
   service = new FinancialAnalyticsService(),
   settings = new SettingsRepository(),
   tokenGuard = requireReportingToken,
-  pdfRenderer = streamDailyHighlightPdf
+  pdfRenderer = streamDailyHighlightPdf,
+  auditService = null
 ) => {
   const router = Router();
+
+  const withFinancialHealth = (report, accountKey) => {
+    if (!auditService) return report;
+    try {
+      return { ...report, financialHealth: auditService.getCompactHealth(accountKey) };
+    } catch (error) {
+      if (error.status !== 404) throw error;
+      return {
+        ...report,
+        financialHealth: {
+          status: 'not_assessable',
+          confidenceScore: null,
+          reason: 'No completed financial health audit exists for this account.',
+        },
+      };
+    }
+  };
 
   router.get('/daily-highlight', tokenGuard, async (request, response) => {
     const context = reportContext(request, settings);
     const anchorDate = request.query.anchorDate || getDateInTimezone(new Date(), context.timezone);
-    response.json(await service.buildDailyHighlightReport(request.query.accountKey, anchorDate, context));
+    const report = await service.buildDailyHighlightReport(request.query.accountKey, anchorDate, context);
+    response.json(withFinancialHealth(report, request.query.accountKey));
   });
 
   router.get('/daily-highlight.pdf', async (request, response) => {
@@ -44,7 +63,10 @@ export const createReportingRouter = (
       return response.status(401).json({ error: 'Admin access is required for an Admin report.' });
     }
     const anchorDate = request.query.anchorDate || getDateInTimezone(new Date(), context.timezone);
-    const report = await service.buildDailyHighlightReport(request.query.accountKey, anchorDate, context);
+    const report = withFinancialHealth(
+      await service.buildDailyHighlightReport(request.query.accountKey, anchorDate, context),
+      request.query.accountKey
+    );
     const filename = `forecast-magic-daily-highlight-${report.reportDate}-${safeFilenamePart(report.account.name)}.pdf`;
     response.setHeader('Content-Type', 'application/pdf');
     response.setHeader('Content-Disposition', `attachment; filename="${filename}"`);

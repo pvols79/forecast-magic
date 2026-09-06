@@ -19,6 +19,8 @@ Forecast Magic is independent software and is not affiliated with, endorsed by, 
 - Lunch Money category drawdown and per-transaction exclusions
 - Admin and read-only Household presentations
 - Admin-only review of likely manual/imported Lunch Money duplicates
+- Read-only financial health audits across Lunch Money, Capital One exports, n8n alerts, and Forecast Magic reservations
+- REST and MCP interfaces for conversational troubleshooting and automation
 - On-demand Admin or Household Daily Financial Highlight PDFs with share, download, and print actions
 - Persistent SQLite configuration for use across browsers and machines
 - Light and dark modes
@@ -55,6 +57,8 @@ DATABASE_PATH=./data/app.db
 ADMIN_PASSWORD=choose-a-password
 SESSION_SECRET=choose-a-long-random-value
 REPORTING_API_TOKEN=choose-a-separate-long-random-value
+AUDIT_READ_TOKEN=choose-another-long-random-value
+AUDIT_INGEST_TOKEN=choose-another-long-random-value
 LUNCH_MONEY_API_KEY=
 ```
 
@@ -168,6 +172,14 @@ For automation, `GET /api/reporting/daily-highlight?accountKey=plaid:123&view=ad
 
 The Daily Highlight also includes a read-only count and summary of High- and Medium-confidence duplicate candidates. Detection, review, metadata merging, and destructive resolution remain Admin-only. See [Duplicate Review](docs/duplicate_review.md) for the matching and safety boundaries.
 
+## Financial Health Audit
+
+`POST /api/financial-audit/runs` creates an immutable, account-scoped health snapshot. It compares current Lunch Money data with optional Capital One CSV and n8n alert evidence, reports stale or missing imports, transaction changes, tag compliance, duplicate candidates, source totals, Fund reservations, missed-recurring adjustments, and any unexplained balance difference.
+
+The audit is advisory and non-destructive. It does not connect directly to Plaid, change Lunch Money, hide unresolved transactions from the forecast, or automatically resolve findings. Missing bank transactions are asserted only when current Capital One evidence covers the date being checked.
+
+The same read-only capabilities are available to compatible conversational clients through the Streamable HTTP MCP endpoint at `/mcp`. Use the dedicated `AUDIT_READ_TOKEN`; evidence uploads use a separate `AUDIT_INGEST_TOKEN` that should never be given to ChatGPT. See [Financial Health Audit](docs/financial_audit.md) for setup, REST examples, n8n integration, MCP tools, security boundaries, and ChatGPT connectivity constraints.
+
 The Share Report menu requests a fresh PDF for the selected account and active Admin or Household view. It can open the native file-share sheet, download the PDF, or open the browser print dialog. The PDF is streamed from memory and uses the same report model as the JSON API.
 
 The adapter normalizes Lunch Money's transaction signs once:
@@ -185,7 +197,7 @@ npm run lint
 npm run build
 ```
 
-Tests cover the ledger projection, sign normalization, Fund drawdown, overspending, period anchors, rollover, account isolation, exclusions, category conflicts, available-to-spend calculations, and SQLite persistence.
+Tests cover the ledger projection, sign normalization, Fund drawdown, overspending, period anchors, rollover, account isolation, exclusions, category conflicts, available-to-spend calculations, financial-audit normalization and matching, REST/MCP access boundaries, and SQLite persistence.
 
 ## Privacy
 

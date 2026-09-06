@@ -2,7 +2,7 @@ import { applyOperationalFunds } from '../../src/availableToSpend.js';
 import { projectCashFlow } from '../../src/projection.js';
 import { selectUpcomingEvents } from '../../src/upcomingEvents.js';
 import {
-  fundCards, summarizeCashPosition, summarizeUpcomingAttention,
+  fundCards, summarizeCashPosition, summarizeOpeningReconciliation, summarizeUpcomingAttention,
   summarizeSpendingTrends, summarizeUnallocatedSpending,
 } from '../domain/financialAnalytics.js';
 import { addDays } from '../domain/periods.js';
@@ -90,6 +90,7 @@ export class FinancialAnalyticsService {
         name: account.name,
       },
       cashPosition: summarizeCashPosition(projection, anchorDate),
+      openingReconciliation: summarizeOpeningReconciliation(projection),
       needsAttention: summarizeUpcomingAttention(upcomingEvents, anchorDate),
       spendingTrends: summarizeSpendingTrends(transactions, categories, accountKey, anchorDate),
       unallocatedSpending: summarizeUnallocatedSpending(
