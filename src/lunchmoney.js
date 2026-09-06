@@ -47,6 +47,8 @@ export const normalizeTransaction = (transaction) => {
   if (accountId == null) return null;
 
   const lunchMoneySource = transaction.source;
+  const tagNames = transaction.tag_names
+    || (transaction.tags || []).map(tag => typeof tag === 'string' ? tag : tag.name).filter(Boolean);
 
   return {
     id: `transaction:${transaction.id}`,
@@ -63,7 +65,11 @@ export const normalizeTransaction = (transaction) => {
     balanceTreatment: getTransactionBalanceTreatment({
       accountSource: source,
       lunchMoneySource,
+      isPending: Boolean(transaction.is_pending),
+      tagNames,
     }),
+    tagIds: transaction.tag_ids || [],
+    tagNames,
     is_pending: Boolean(transaction.is_pending),
   };
 };

@@ -94,11 +94,13 @@ export class LunchMoneyService {
     };
   }
 
-  normalizeTransaction(transaction, anchorDate) {
+  normalizeTransaction(transaction, anchorDate, tagNamesById = new Map()) {
     const source = transaction.manual_account_id != null ? 'manual' : 'plaid';
     const id = transaction.manual_account_id ?? transaction.plaid_account_id;
     if (id == null) return null;
     const lunchMoneySource = transaction.source;
+    const tagIds = transaction.tag_ids || [];
+    const tagNames = tagIds.map(tagId => tagNamesById.get(Number(tagId))).filter(Boolean);
     return {
       id: `transaction:${transaction.id}`,
       accountId: id,
@@ -114,8 +116,12 @@ export class LunchMoneyService {
       balanceTreatment: getTransactionBalanceTreatment({
         accountSource: source,
         lunchMoneySource,
+        isPending: Boolean(transaction.is_pending),
+        tagNames,
       }),
       categoryId: transaction.category_id,
+      tagIds,
+      tagNames,
       isPending: Boolean(transaction.is_pending),
       is_pending: Boolean(transaction.is_pending),
     };
@@ -200,10 +206,23 @@ export class LunchMoneyService {
       }));
   }
 
+  async getTags() {
+    const data = await this.get('/tags');
+    return unwrapList(data, 'tags').map(tag => ({
+      id: Number(tag.id),
+      name: tag.name,
+      archived: Boolean(tag.archived_at || tag.archived),
+    }));
+  }
+
   async getTransactions(startDate, endDate, anchorDate = startDate) {
-    const transactions = await this.getRawTransactions(startDate, endDate);
+    const [transactions, tags] = await Promise.all([
+      this.getRawTransactions(startDate, endDate),
+      this.getTags(),
+    ]);
+    const tagNamesById = new Map(tags.map(tag => [tag.id, tag.name]));
     return transactions
-      .map(transaction => this.normalizeTransaction(transaction, anchorDate))
+      .map(transaction => this.normalizeTransaction(transaction, anchorDate, tagNamesById))
       .filter(Boolean);
   }
 

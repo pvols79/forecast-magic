@@ -141,6 +141,7 @@ describe('projectCashFlow', () => {
         type: 'actual',
         lunchMoneySource: 'api',
         balanceTreatment: 'unreflected',
+        tagNames: ['Forecast Magic Pending'],
       }],
       'plaid:1',
       1,
@@ -160,7 +161,7 @@ describe('projectCashFlow', () => {
         {
           id: 'transaction:n8n-purchase', accountKey: 'plaid:1', date: '2026-08-10',
           description: 'Walmart', amount: -50.42, type: 'actual', lunchMoneySource: 'api',
-          balanceTreatment: 'unreflected',
+          balanceTreatment: 'unreflected', tagNames: ['Forecast Magic Pending'],
         },
         {
           id: 'transaction:plaid-purchase', accountKey: 'plaid:1', date: '2026-08-10',
@@ -177,6 +178,22 @@ describe('projectCashFlow', () => {
     // placeholder exposes the unresolved duplicate until the Admin resolves it.
     expect(balanceOn(projection, '2026-08-11')).toBeCloseTo(2949.58);
     expect(projection.openingBalance.adjustmentEvents).toHaveLength(1);
+  });
+
+  it('does not reapply historical untagged API transactions to the synced balance', () => {
+    const projection = projectCashFlow(
+      [checkingAccount],
+      [
+        { id: 'transaction:1', accountKey: 'plaid:1', date: '2026-08-01', description: 'Amazon', amount: -62.83, type: 'actual', lunchMoneySource: 'api', balanceTreatment: 'included' },
+        { id: 'transaction:2', accountKey: 'plaid:1', date: '2026-08-02', description: 'Groceries', amount: -364.26, type: 'actual', lunchMoneySource: 'api', balanceTreatment: 'included' },
+      ],
+      'plaid:1',
+      1,
+      { anchorDate: '2026-09-05' }
+    );
+
+    expect(balanceOn(projection, '2026-09-05')).toBe(3000);
+    expect(projection.openingBalance.adjustmentEvents).toHaveLength(0);
   });
 
   it('reports anchor-date activity separately in the opening reconciliation', () => {

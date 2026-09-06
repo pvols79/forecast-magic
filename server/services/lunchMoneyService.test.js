@@ -28,7 +28,7 @@ describe('LunchMoneyService recurring schedule normalization', () => {
 });
 
 describe('LunchMoneyService transaction balance treatment', () => {
-  it('marks an API-created transaction on a Plaid account as unreflected', () => {
+  it('marks a tagged API-created placeholder on a Plaid account as unreflected', () => {
     const service = new LunchMoneyService();
     expect(service.normalizeTransaction({
       id: 90,
@@ -38,11 +38,29 @@ describe('LunchMoneyService transaction balance treatment', () => {
       payee: 'Tractor Supply',
       source: 'api',
       is_pending: false,
-    }, '2026-09-05')).toMatchObject({
+      tag_ids: [41],
+    }, '2026-09-05', new Map([[41, 'N8N Pending']]))).toMatchObject({
       accountKey: 'plaid:5',
       amount: -82.29,
       type: 'actual',
       balanceTreatment: 'unreflected',
+      tagNames: ['N8N Pending'],
+    });
+  });
+
+  it('keeps an untagged historical API transaction in the synced balance', () => {
+    const service = new LunchMoneyService();
+    expect(service.normalizeTransaction({
+      id: 92,
+      plaid_account_id: 5,
+      date: '2026-08-30',
+      amount: '24.08',
+      payee: 'Spotify',
+      source: 'api',
+      is_pending: false,
+      tag_ids: [],
+    }, '2026-09-05')).toMatchObject({
+      balanceTreatment: 'included',
     });
   });
 

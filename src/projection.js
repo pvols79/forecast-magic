@@ -35,7 +35,7 @@ const removeSatisfiedRecurringProjections = (events) => {
   });
 };
 
-// User/API-created transactions assigned to synced accounts do not alter the
+// Explicit pending placeholders assigned to synced accounts do not alter the
 // bank-supplied balance. They remain adjustments until their imported match is
 // retained and the placeholder is removed through Duplicate Review.
 const isOpeningAdjustment = (event, anchorDate) =>

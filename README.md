@@ -139,8 +139,16 @@ The local Node service uses:
 - `GET /v2/manual_accounts`
 - `GET /v2/plaid_accounts`
 - `GET /v2/categories?format=flattened&is_group=false`
+- `GET /v2/tags`
 - `GET /v2/recurring`, with a compatibility fallback to `/v2/recurring_items`
 - `GET /v2/transactions?include_pending=true`
+
+Automation-created placeholders on a synced account must carry a Lunch Money
+tag named `Forecast Magic Pending` (the alias `N8N Pending` is also accepted).
+Forecast Magic applies those tagged rows, and native Lunch Money pending rows,
+until Duplicate Review retains the imported transaction and removes the
+placeholder. An `api` transaction source by itself is not treated as pending,
+because that source remains on historical transactions after they have posted.
 
 Lunch Money v2 transactions provide category IDs rather than hydrated category details. Fund Allocations store those category IDs, while category names are loaded separately for the Admin UI.
 

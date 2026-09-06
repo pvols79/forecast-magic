@@ -1,13 +1,34 @@
-const USER_ENTERED_LUNCH_MONEY_SOURCES = new Set(['api', 'manual', 'recurring']);
+const PENDING_PLACEHOLDER_TAGS = new Set([
+  'forecastmagicpending',
+  'n8npending',
+]);
+const PLACEHOLDER_SOURCES = new Set(['api', 'manual']);
 
-export const getTransactionBalanceTreatment = ({ accountSource, lunchMoneySource }) => {
+const normalizeTagName = value => String(value || '')
+  .toLowerCase()
+  .replace(/[^a-z0-9]/g, '');
+
+export const isPendingPlaceholderTag = value =>
+  PENDING_PLACEHOLDER_TAGS.has(normalizeTagName(value));
+
+export const getTransactionBalanceTreatment = ({
+  accountSource,
+  lunchMoneySource,
+  isPending = false,
+  tagNames = [],
+}) => {
   const normalizedSource = String(lunchMoneySource || '').toLowerCase();
 
-  // Transactions created by a user or automation against a synced account do
-  // not change its bank-supplied balance. Keep recurring-created transactions
-  // compatible with the existing opening-adjustment behavior for all accounts.
-  if (normalizedSource === 'recurring'
-    || (accountSource === 'plaid' && USER_ENTERED_LUNCH_MONEY_SOURCES.has(normalizedSource))) {
+  // A transaction's API source describes how it was created, not whether it is
+  // already represented by the current bank balance. Only explicit pending
+  // signals may turn a synced-account transaction into an adjustment.
+  if (normalizedSource === 'recurring' || (
+    accountSource === 'plaid'
+    && (isPending || (
+      PLACEHOLDER_SOURCES.has(normalizedSource)
+      && tagNames.some(isPendingPlaceholderTag)
+    ))
+  )) {
     return 'unreflected';
   }
 

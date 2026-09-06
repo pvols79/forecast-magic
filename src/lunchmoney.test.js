@@ -34,35 +34,65 @@ describe('Lunch Money v2 normalization', () => {
     });
   });
 
-  it('marks API and manual placeholders on Plaid accounts as absent from the synced balance', () => {
-    for (const source of ['api', 'manual']) {
-      expect(normalizeTransaction({
-        id: source,
-        plaid_account_id: 123,
-        date: '2026-09-05',
-        payee: 'Email-created purchase',
-        amount: '25.00',
-        is_pending: false,
-        source,
-      })).toMatchObject({
-        accountKey: 'plaid:123',
-        amount: -25,
-        balanceTreatment: 'unreflected',
-      });
-    }
-  });
-
-  it('does not mark API transactions on manual accounts as unreflected', () => {
+  it('marks explicitly tagged API placeholders as absent from the synced balance', () => {
     expect(normalizeTransaction({
       id: 3,
-      manual_account_id: 456,
+      plaid_account_id: 123,
       date: '2026-09-05',
-      payee: 'Manual account entry',
+      payee: 'Email-created purchase',
+      amount: '25.00',
+      is_pending: false,
+      source: 'api',
+      tag_names: ['Forecast Magic Pending'],
+    })).toMatchObject({
+      accountKey: 'plaid:123',
+      amount: -25,
+      balanceTreatment: 'unreflected',
+      tagNames: ['Forecast Magic Pending'],
+    });
+  });
+
+  it('does not treat API source alone as proof that a transaction is unreflected', () => {
+    expect(normalizeTransaction({
+      id: 4,
+      plaid_account_id: 123,
+      date: '2026-09-05',
+      payee: 'Historical automation entry',
       amount: '25.00',
       is_pending: false,
       source: 'api',
     })).toMatchObject({
-      accountKey: 'manual:456',
+      accountKey: 'plaid:123',
+      balanceTreatment: 'included',
+    });
+  });
+
+  it('marks Lunch Money pending activity on Plaid accounts as unreflected', () => {
+    expect(normalizeTransaction({
+      id: 5,
+      plaid_account_id: 123,
+      date: '2026-09-05',
+      payee: 'Pending purchase',
+      amount: '25.00',
+      is_pending: true,
+      source: 'plaid',
+    })).toMatchObject({
+      type: 'pending',
+      balanceTreatment: 'unreflected',
+    });
+  });
+
+  it('does not reapply an imported transaction if a placeholder tag was retained during merge', () => {
+    expect(normalizeTransaction({
+      id: 6,
+      plaid_account_id: 123,
+      date: '2026-09-04',
+      payee: 'Imported purchase',
+      amount: '25.00',
+      is_pending: false,
+      source: 'plaid',
+      tag_names: ['Forecast Magic Pending'],
+    })).toMatchObject({
       balanceTreatment: 'included',
     });
   });

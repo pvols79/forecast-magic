@@ -2,7 +2,8 @@
 
 ## Unreleased
 
-- Treat API- and manually created transactions on Plaid accounts as opening adjustments until Duplicate Review replaces them with their imported transaction.
+- Treat only explicitly pending or pending-tagged placeholders on Plaid accounts as opening adjustments.
+- Avoid reapplying historical API-created transactions already represented by the synced account balance.
 - Preserve unresolved manual/imported duplicates in the projection so data issues remain visible for review.
 
 ## 0.1.1 - Docker Runtime Fix
