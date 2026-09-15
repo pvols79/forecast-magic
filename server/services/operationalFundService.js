@@ -42,6 +42,10 @@ export class OperationalFundService {
     });
 
     for (const state of projection.currentFunds) {
+      if (state.allocationMode === 'scheduled' && state.periodType !== 'all-time') {
+        this.repository.saveAllocationHistory(state.id, state.allocationHistory);
+        state.allocationHistory = this.repository.getAllocationHistory(state.id);
+      }
       this.repository.saveCurrentState({
         fundId: state.id,
         periodStart: state.periodStart,

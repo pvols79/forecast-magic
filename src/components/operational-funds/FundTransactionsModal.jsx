@@ -18,6 +18,25 @@ const FundTransactionsModal = ({ isOpen, onClose, fund, canManageExclusions = fa
       <ModalHeader>{fund?.name} Transactions</ModalHeader>
       <ModalCloseButton />
       <ModalBody>
+        {fund?.allocationMode === 'scheduled' && fund.periodType !== 'all-time' && (
+          <Box mb={6} overflowX="auto">
+            <ChakraText fontWeight="semibold" mb={2}>Allocation history</ChakraText>
+            {fund.allocationHistory?.length ? (
+              <Table size="sm">
+                <Thead><Tr><Th>Period</Th><Th isNumeric>Period funding</Th><Th isNumeric>Rollover</Th></Tr></Thead>
+                <Tbody>
+                  {fund.allocationHistory.map(period => (
+                    <Tr key={period.periodStart}>
+                      <Td whiteSpace="nowrap">{period.periodStart} – {period.periodEnd}</Td>
+                      <Td isNumeric>{formatCurrency(period.allocationCents / 100)}</Td>
+                      <Td isNumeric>{formatCurrency(period.carryInCents / 100)}</Td>
+                    </Tr>
+                  ))}
+                </Tbody>
+              </Table>
+            ) : <ChakraText>No recorded allocations yet.</ChakraText>}
+          </Box>
+        )}
         <ChakraText fontSize="sm" color="gray.500" mb={4}>
           Transactions remain visible after the allocation reaches zero so the full period spending is accounted for.
         </ChakraText>

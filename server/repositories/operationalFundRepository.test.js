@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { closeDatabase, configureDatabase, getDatabase } from '../db/database';
 import { runMigrations } from '../db/migrate';
 import { OperationalFundRepository } from './operationalFundRepository';
+import { OperationalFundService } from '../services/operationalFundService';
 
 let directory;
 let databasePath;
@@ -40,6 +41,37 @@ afterEach(() => {
 });
 
 describe('OperationalFundRepository', () => {
+  it('retains scheduled allocation history across skipped periods, repeated reads and restart only', async () => {
+    const scheduled = repository.create(fund({ categoryIds: [] }));
+    const sinking = repository.create(fund({
+      name: 'Sinking', fundType: 'sinking', initialBalanceCents: 90000,
+      allocationCents: 20000, targetCents: 100000, categoryIds: [],
+    }));
+    const manual = repository.create(fund({
+      name: 'Manual', fundType: 'sinking', allocationMode: 'manual', categoryIds: [],
+    }));
+    const reserved = repository.create(fund({
+      name: 'Reserved', fundType: 'reserved', categoryIds: [],
+    }));
+    const service = new OperationalFundService(repository, { getTransactions: async () => [] });
+    await service.getProjection('plaid:1', '2026-08-13', '2026-09-30');
+    await service.getProjection('plaid:1', '2026-08-31', '2026-09-30');
+    await service.getProjection('plaid:1', '2026-08-31', '2026-09-30');
+    expect(repository.getAllocationHistory(scheduled.id).map(period => period.periodStart))
+      .toEqual(['2026-08-31', '2026-08-24', '2026-08-17', '2026-08-10']);
+    expect(repository.getAllocationHistory(sinking.id).map(period => period.allocationCents))
+      .toEqual([0, 0, 10000, 90000]);
+    repository.saveAllocationHistory(manual.id, repository.getAllocationHistory(scheduled.id));
+    repository.saveAllocationHistory(reserved.id, repository.getAllocationHistory(scheduled.id));
+    expect(repository.getAllocationHistory(manual.id)).toEqual([]);
+    expect(repository.getAllocationHistory(reserved.id)).toEqual([]);
+    closeDatabase();
+    configureDatabase(databasePath);
+    expect(repository.getAllocationHistory(scheduled.id)).toHaveLength(4);
+    repository.delete(scheduled.id);
+    expect(repository.getAllocationHistory(scheduled.id)).toEqual([]);
+  });
+
   it('prevents active category overlap within an account and identifies the owning Fund', () => {
     repository.create(fund({ name: 'Fuel' }));
     expect(() => repository.create(fund({ name: 'Car costs' }))).toThrow(/already assigned to Fuel/);

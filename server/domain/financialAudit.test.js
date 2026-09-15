@@ -12,6 +12,17 @@ import {
 } from './financialAudit.js';
 
 describe('financial audit domain', () => {
+  it.each(['n8n_proc', 'N8N Pending'])('excludes the old %s tag from outstanding placeholder totals', tag => {
+    const transaction = normalizeAuditTransaction({
+      id: 1, plaid_account_id: 1, date: '2026-09-05', amount: '100.00',
+      source: 'api', tag_ids: [1], notes: 'Created from Capital One Gmail alert by n8n.',
+    }, new Map([[1, tag]]));
+    expect(transaction.hasPendingTag).toBe(false);
+    expect(buildBalanceBridge({ lunchMoneyBalanceCents: 100000, transactions: [transaction] }))
+      .toMatchObject({ taggedN8nPlaceholderCents: 0, expectedAvailableCents: 100000 });
+    expect(findStalePendingTransactions([transaction], '2026-09-15')).toEqual([]);
+  });
+
   it('normalizes Lunch Money signs and compound account identity', () => {
     const debit = normalizeAuditTransaction({
       id: 1,
@@ -105,8 +116,40 @@ describe('financial audit domain', () => {
       capitalOneAvailableBalanceCents: 96500,
       nativePendingCents: -1000,
       taggedN8nPlaceholderCents: -2500,
+      taggedManualPlaceholderCents: 0,
       expectedAvailableCents: 96500,
       unexplainedAvailableDifferenceCents: 0,
+    });
+  });
+
+  it('counts manual and n8n placeholders but excludes settled imports with inherited tags', () => {
+    const tags = new Map([[1, 'LM Manual'], [2, 'Forecast Magic Pending'], [3, 'n8n_proc']]);
+    const make = overrides => normalizeAuditTransaction({
+      id: 1, plaid_account_id: 1, date: '2026-09-01', amount: '100.00',
+      source: 'manual', tag_ids: [1], ...overrides,
+    }, tags);
+    const manual = make({ amount: '2043.79' });
+    const n8n = make({ id: 2, source: 'api', tag_ids: [2, 3] });
+    const settled = make({ id: 3, source: 'plaid', amount: '5000.00', tag_ids: [1, 2, 3] });
+    const nativePending = make({ id: 4, source: 'plaid', amount: '20.00', is_pending: true, tag_ids: [2] });
+    const refund = make({ id: 5, source: 'api', amount: '-50.00', tag_ids: [2, 3] });
+    const manualAccount = make({ id: 6, manual_account_id: 2, amount: '200.00' });
+    const transactions = [manual, n8n, settled, nativePending, refund, manualAccount];
+
+    expect(buildBalanceBridge({ lunchMoneyBalanceCents: 1000000, transactions })).toMatchObject({
+      nativePendingCents: -2000,
+      taggedN8nPlaceholderCents: -5000,
+      taggedManualPlaceholderCents: -204379,
+      expectedAvailableCents: 788621,
+    });
+    expect(summarizeTransactionSources(transactions)).toMatchObject({
+      taggedPendingPlaceholders: { count: 2, netCents: -5000 },
+      taggedManualPlaceholders: { count: 1, netCents: -204379 },
+    });
+    expect(findStalePendingTransactions(transactions, '2026-09-15').map(t => t.transactionId))
+      .toEqual(['1', '2', '4', '5']);
+    expect(findTagComplianceIssues([settled])).toEqual({
+      untaggedN8nCandidates: [], stalePendingCandidates: [],
     });
   });
 

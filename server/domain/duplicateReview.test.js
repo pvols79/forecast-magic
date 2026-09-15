@@ -42,6 +42,59 @@ describe('duplicate transaction detection', () => {
     });
   });
 
+  it('allows a strong API-created/imported match across a four-day settlement delay', () => {
+    const candidates = scan([
+      transaction({
+        id: 1,
+        source: 'api',
+        date: '2026-09-05',
+        payee: 'Google One',
+        amount: '21.9400',
+        category_id: 11,
+      }),
+      transaction({
+        id: 2,
+        source: 'plaid',
+        date: '2026-09-09',
+        payee: 'Google One',
+        amount: '21.9400',
+        category_id: 11,
+      }),
+    ]);
+
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0]).toMatchObject({
+      confidence: 'medium',
+      daysApart: 4,
+      reasons: expect.arrayContaining([
+        'Exact amount',
+        'API-created plus imported',
+        '4-day date difference',
+        'Similar payee',
+        'Same category',
+      ]),
+    });
+  });
+
+  it('does not extend the settlement window for weak API or ordinary manual matches', () => {
+    expect(scan([
+      transaction({ id: 1, source: 'api', date: '2026-09-05', payee: 'Google One', category_id: 11 }),
+      transaction({ id: 2, source: 'plaid', date: '2026-09-09', payee: 'Unrelated Merchant', category_id: 11 }),
+    ], { includeLow: true })).toEqual([]);
+
+    expect(scan([
+      transaction({ id: 3, source: 'manual', date: '2026-09-05', payee: 'Google One', category_id: 11 }),
+      transaction({ id: 4, source: 'plaid', date: '2026-09-09', payee: 'Google One', category_id: 11 }),
+    ], { includeLow: true })).toEqual([]);
+  });
+
+  it('does not match API-created and imported transactions more than five days apart', () => {
+    expect(scan([
+      transaction({ id: 1, source: 'api', date: '2026-09-03', payee: 'Google One', category_id: 11 }),
+      transaction({ id: 2, source: 'plaid', date: '2026-09-09', payee: 'Google One', category_id: 11 }),
+    ], { includeLow: true })).toEqual([]);
+  });
+
   it('treats a recurring-created transaction as user-entered for duplicate review', () => {
     const candidates = scan([
       transaction({

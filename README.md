@@ -128,7 +128,7 @@ Available to Spend = Projected Ledger Balance - Remaining Fund Allocations
 
 Actual matching Lunch Money spending reduces both the account balance and the matching Fund. Real pending or future-dated Lunch Money spending does the same on its transaction date. This prevents reserved spending from reducing available-to-spend twice. A Fund stops at zero, and spending beyond zero reduces available-to-spend normally. Recurring projections reserve ledger cash but do not draw down Funds.
 
-Transactions created manually or through an automation such as n8n and assigned to a Plaid account do not alter Lunch Money's bank-supplied balance. Forecast Magic therefore treats Lunch Money sources `api`, `manual`, and `recurring` as opening adjustments while they are dated today or earlier. When Plaid later imports the real transaction, Duplicate Review keeps the imported row and deletes the placeholder; the adjustment then disappears. Forecast Magic intentionally does not hide unresolved duplicate pairs because they represent the current Lunch Money data and require review.
+Transactions created manually or through an automation such as n8n and assigned to a Plaid account do not alter Lunch Money's bank-supplied balance. Tag a manually created placeholder `LM Manual`; tag an automation placeholder `Forecast Magic Pending`. Forecast Magic applies these tagged `manual` and `api` entries as opening adjustments when dated today or earlier. Native pending transactions and Lunch Money source `recurring` are also opening adjustments. Untagged past manual/API entries are treated as already included. When Plaid later imports the real transaction, Duplicate Review keeps the imported row and deletes the placeholder; the adjustment then disappears. An imported, settled row does not become an extra adjustment if it inherits these tags. Forecast Magic intentionally does not hide unresolved duplicate pairs because they represent the current Lunch Money data and require review.
 
 Every future periodic boundary adds one flat allocation to the available-to-spend projection. For example, a `$125` Weekly Fuel Fund adds another `$125` commitment each week across the chart horizon. This is linear recurring commitment, not exponential growth. Rollover separately controls how much actually unused period balance remains available in the next period; it is not required for future allocations to appear in the forecast.
 
@@ -148,7 +148,7 @@ The local Node service uses:
 - `GET /v2/transactions?include_pending=true`
 
 Automation-created placeholders on a synced account must carry a Lunch Money
-tag named `Forecast Magic Pending` (the alias `N8N Pending` is also accepted).
+tag named `Forecast Magic Pending`. Older `n8n_proc` and `N8N Pending` tags do not trigger forecast deductions.
 Forecast Magic applies those tagged rows, and native Lunch Money pending rows,
 until Duplicate Review retains the imported transaction and removes the
 placeholder. An `api` transaction source by itself is not treated as pending,

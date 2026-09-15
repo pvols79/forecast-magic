@@ -3,6 +3,8 @@ import crypto from 'node:crypto';
 const DAY_MS = 24 * 60 * 60 * 1000;
 const USER_ENTERED_SOURCES = new Set(['manual', 'api', 'recurring']);
 const IMPORTED_SOURCE = 'plaid';
+const STANDARD_MAX_DATE_DIFFERENCE_DAYS = 3;
+const API_SETTLEMENT_MAX_DATE_DIFFERENCE_DAYS = 5;
 
 const asId = value => value == null ? null : String(value);
 const asNumber = value => {
@@ -118,13 +120,21 @@ const scorePair = (manual, imported) => {
   if (manual.apiAmount !== imported.apiAmount) return null;
 
   const daysApart = dateDifference(manual.date, imported.date);
-  if (daysApart > 3) return null;
-
   const similarity = payeeSimilarity(manual.payee, imported.payee);
   const sameCategory = manual.categoryId != null && manual.categoryId === imported.categoryId;
   const sameRecurring = manual.recurringId != null && manual.recurringId === imported.recurringId;
+  // API placeholders may carry an authorization date several days before the
+  // bank posts the imported transaction. Extend that window only when the
+  // account, amount, payee, and category all strongly identify the same charge.
+  const extendedApiSettlementMatch = manual.source === 'api'
+    && daysApart <= API_SETTLEMENT_MAX_DATE_DIFFERENCE_DAYS
+    && similarity >= 0.72
+    && sameCategory;
+  if (daysApart > STANDARD_MAX_DATE_DIFFERENCE_DAYS && !extendedApiSettlementMatch) return null;
+
   let confidence;
   if (daysApart <= 1 && similarity >= 0.72) confidence = 'high';
+  else if (extendedApiSettlementMatch) confidence = 'medium';
   else if (daysApart <= 2 || similarity >= 0.35 || sameCategory || sameRecurring) confidence = 'medium';
   else confidence = 'low';
 

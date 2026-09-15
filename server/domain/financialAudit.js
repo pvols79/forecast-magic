@@ -1,10 +1,11 @@
 import crypto from 'node:crypto';
 import { parse } from 'csv-parse/sync';
 import { payeeSimilarity } from './duplicateReview.js';
+import { getTransactionBalanceTreatment } from '../../src/transactionBalance.js';
 
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const N8N_NOTE_PATTERN = /created from capital one gmail alert by n8n/i;
-const PENDING_TAG_NAMES = new Set(['forecastmagicpending', 'n8npending']);
+const PENDING_TAG_NAMES = new Set(['forecastmagicpending']);
 const N8N_TAG_NAMES = new Set(['n8nproc', 'n8nprocessed', 'n8ncreated']);
 
 const normalizeName = value => String(value || '')
@@ -33,6 +34,16 @@ const accountKeyFor = transaction => transaction.manual_account_id != null
     : null;
 
 const unique = values => [...new Set(values.filter(value => value != null))];
+
+const balanceTreatmentFor = transaction => getTransactionBalanceTreatment({
+  accountSource: transaction.accountKey?.split(':')[0] || 'plaid',
+  lunchMoneySource: transaction.source,
+  isPending: transaction.isPending,
+  tagNames: transaction.tagNames || (transaction.hasPendingTag ? ['Forecast Magic Pending'] : []),
+});
+
+const isPlaceholder = transaction => ['api', 'manual'].includes(transaction.source)
+  && balanceTreatmentFor(transaction) === 'unreflected';
 
 export const businessDaysBetween = (startDate, endDate) => {
   if (!DATE_PATTERN.test(startDate) || !DATE_PATTERN.test(endDate) || startDate >= endDate) return 0;
@@ -205,22 +216,27 @@ export const summarizeTransactionSources = transactions => {
     imported: summary(transactions.filter(transaction => transaction.source === 'plaid' && !transaction.isPending)),
     nativePending: summary(transactions.filter(transaction => transaction.source === 'plaid' && transaction.isPending)),
     n8nCreated: summary(transactions.filter(transaction => transaction.isN8n)),
-    taggedPendingPlaceholders: summary(transactions.filter(transaction => transaction.isN8n && transaction.hasPendingTag)),
+    taggedPendingPlaceholders: summary(transactions.filter(transaction => isPlaceholder(transaction) && transaction.source === 'api')),
+    taggedManualPlaceholders: summary(transactions.filter(transaction => isPlaceholder(transaction) && transaction.source === 'manual')),
   };
 };
 
 export const buildBalanceBridge = ({ lunchMoneyBalanceCents, capitalOneLedgerCents, capitalOneAvailableCents, transactions }) => {
-  const nativePending = transactions.filter(transaction => transaction.source === 'plaid' && transaction.isPending);
-  const placeholders = transactions.filter(transaction => transaction.isN8n && transaction.hasPendingTag && !transaction.isPending);
+  const nativePending = transactions.filter(transaction => transaction.source === 'plaid' && transaction.isPending && balanceTreatmentFor(transaction) === 'unreflected');
+  const placeholders = transactions.filter(isPlaceholder);
   const nativePendingCents = nativePending.reduce((total, transaction) => total + transaction.amountCents, 0);
-  const placeholderCents = placeholders.reduce((total, transaction) => total + transaction.amountCents, 0);
-  const expectedAvailableCents = lunchMoneyBalanceCents + nativePendingCents + placeholderCents;
+  const placeholderCents = placeholders.filter(transaction => transaction.source === 'api')
+    .reduce((total, transaction) => total + transaction.amountCents, 0);
+  const manualPlaceholderCents = placeholders.filter(transaction => transaction.source === 'manual')
+    .reduce((total, transaction) => total + transaction.amountCents, 0);
+  const expectedAvailableCents = lunchMoneyBalanceCents + nativePendingCents + placeholderCents + manualPlaceholderCents;
   return {
     lunchMoneySyncedBalanceCents: lunchMoneyBalanceCents,
     capitalOneLedgerBalanceCents: capitalOneLedgerCents ?? null,
     capitalOneAvailableBalanceCents: capitalOneAvailableCents ?? null,
     nativePendingCents,
     taggedN8nPlaceholderCents: placeholderCents,
+    taggedManualPlaceholderCents: manualPlaceholderCents,
     expectedAvailableCents,
     unexplainedAvailableDifferenceCents: capitalOneAvailableCents == null
       ? null
@@ -229,12 +245,12 @@ export const buildBalanceBridge = ({ lunchMoneyBalanceCents, capitalOneLedgerCen
 };
 
 export const findTagComplianceIssues = transactions => ({
-  untaggedN8nCandidates: transactions.filter(transaction => transaction.isN8n && !transaction.hasPendingTag),
-  stalePendingCandidates: transactions.filter(transaction => transaction.hasPendingTag && !transaction.isN8n),
+  untaggedN8nCandidates: transactions.filter(transaction => transaction.source === 'api' && transaction.isN8n && !transaction.hasPendingTag),
+  stalePendingCandidates: transactions.filter(transaction => isPlaceholder(transaction) && transaction.hasPendingTag && !transaction.isN8n),
 });
 
 export const findStalePendingTransactions = (transactions, anchorDate, warningDays = 3) => transactions
-  .filter(transaction => transaction.isPending || transaction.hasPendingTag)
+  .filter(transaction => (transaction.isPending && balanceTreatmentFor(transaction) === 'unreflected') || isPlaceholder(transaction))
   .map(transaction => ({ ...transaction, businessDaysOpen: businessDaysBetween(transaction.date, anchorDate) }))
   .filter(transaction => transaction.businessDaysOpen > warningDays)
   .sort((left, right) => right.businessDaysOpen - left.businessDaysOpen);

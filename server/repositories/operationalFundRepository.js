@@ -259,6 +259,37 @@ export class OperationalFundRepository {
     getDatabase().prepare('DELETE FROM operational_fund_current_state WHERE fund_id = ?').run(fundId);
   }
 
+  saveAllocationHistory(fundId, periods) {
+    const fund = this.getById(fundId);
+    if (!fund || fund.allocationMode !== 'scheduled' || fund.periodType === 'all-time') return;
+    withTransaction(db => {
+      const insert = db.prepare(`
+        INSERT INTO operational_fund_allocation_history
+          (fund_id, period_start, period_end, allocation_cents, carry_in_cents)
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(fund_id, period_start) DO UPDATE SET
+          period_end = excluded.period_end,
+          allocation_cents = excluded.allocation_cents,
+          carry_in_cents = excluded.carry_in_cents
+      `);
+      for (const period of periods) insert.run(
+        fundId, period.periodStart, period.periodEnd, period.allocationCents, period.carryInCents
+      );
+    });
+  }
+
+  getAllocationHistory(fundId) {
+    return getDatabase().prepare(`
+      SELECT * FROM operational_fund_allocation_history
+      WHERE fund_id = ? ORDER BY period_start DESC
+    `).all(fundId).map(row => ({
+      periodStart: row.period_start,
+      periodEnd: row.period_end,
+      allocationCents: Number(row.allocation_cents),
+      carryInCents: Number(row.carry_in_cents),
+    }));
+  }
+
   addExclusion(fundId, transactionId) {
     if (transactionId == null || transactionId === '') throw new Error('Transaction ID is required.');
     getDatabase().prepare(`

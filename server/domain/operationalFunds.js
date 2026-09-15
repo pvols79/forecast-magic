@@ -94,6 +94,18 @@ const contributionForBoundary = (fund, remainingCents) => {
 
 export const calculateCurrentFundState = (fund, checkpoint, transactions, anchorDate) => {
   const currentPeriod = getPeriodForDate(fund, anchorDate);
+  const allocationHistory = [];
+  const recordPeriod = state => {
+    if (allocationModeFor(fund) === 'scheduled' && fund.periodType !== 'all-time') {
+      allocationHistory.push({
+        periodStart: state.periodStart,
+        periodEnd: state.periodEnd,
+        allocationCents: state.allocationCents,
+        carryInCents: state.carryInCents,
+      });
+    }
+    return { ...state, allocationHistory };
+  };
 
   if (fund.periodType === 'all-time') {
     return stateForPeriod(
@@ -108,7 +120,7 @@ export const calculateCurrentFundState = (fund, checkpoint, transactions, anchor
   }
 
   if (!checkpoint || checkpoint.periodStart > currentPeriod.start) {
-    return stateForPeriod(
+    return recordPeriod(stateForPeriod(
       fund,
       currentPeriod,
       initialPeriodAllocation(fund),
@@ -116,7 +128,7 @@ export const calculateCurrentFundState = (fund, checkpoint, transactions, anchor
       transactions,
       anchorDate,
       anchorDate
-    );
+    ));
   }
 
   let period = getPeriodForDate(fund, checkpoint.periodStart);
@@ -131,6 +143,7 @@ export const calculateCurrentFundState = (fund, checkpoint, transactions, anchor
     period.start === currentPeriod.start ? anchorDate : period.end,
     anchorDate
   );
+  recordPeriod(state);
 
   while (period.start < currentPeriod.start) {
     const carryInCents = fundTypeFor(fund) === 'sinking'
@@ -147,9 +160,10 @@ export const calculateCurrentFundState = (fund, checkpoint, transactions, anchor
       period.start === currentPeriod.start ? anchorDate : period.end,
       anchorDate
     );
+    recordPeriod(state);
   }
 
-  return state;
+  return { ...state, allocationHistory };
 };
 
 const publicFundState = (fund, state) => ({
@@ -170,6 +184,7 @@ const publicFundState = (fund, state) => ({
   householdVisible: fund.householdVisible,
   categoryIds: fund.categoryIds,
   transactions: state.periodTransactions,
+  allocationHistory: state.allocationHistory || [],
 });
 
 export const projectOperationalFunds = ({ funds, checkpoints = new Map(), transactions = [], accountKey, anchorDate, endDate }) => {

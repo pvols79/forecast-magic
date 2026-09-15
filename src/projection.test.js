@@ -1,11 +1,50 @@
 import { describe, expect, it } from 'vitest';
 import { projectCashFlow } from './projection';
+import { LunchMoneyService } from '../server/services/lunchMoneyService.js';
+import { applyOperationalFunds } from './availableToSpend.js';
+import { detectDuplicateCandidates, normalizeReviewTransaction, buildMetadataMerge } from '../server/domain/duplicateReview.js';
 
 const checkingAccount = { id: 1, source: 'plaid', key: 'plaid:1', name: 'Checking', balance: 3000 };
 const savingsAccount = { id: 2, source: 'manual', key: 'manual:2', name: 'Savings', balance: 500 };
 const balanceOn = (projection, date) => projection.dailyBalances.find(day => day.date === date)?.balance;
 
 describe('projectCashFlow', () => {
+  it('deducts an LM Manual mortgage and an n8n placeholder, then stops the extra deduction after resolving an import', () => {
+    const service = new LunchMoneyService();
+    const tags = new Map([[1, 'LM Manual'], [2, 'Forecast Magic Pending']]);
+    const mortgage = {
+      id: 1, plaid_account_id: 1, date: '2026-09-14', payee: 'Rocket Mortgage',
+      amount: '2043.79', source: 'manual', tag_ids: [1], recurring_id: 20, is_pending: false,
+    };
+    const n8n = {
+      id: 2, plaid_account_id: 1, date: '2026-09-15', payee: 'Purchase',
+      amount: '100.00', source: 'api', tag_ids: [2], is_pending: false,
+    };
+    const project = (balance, raw) => projectCashFlow(
+      [{ ...checkingAccount, balance }],
+      raw.map(t => service.normalizeTransaction(t, '2026-09-15', tags)),
+      'plaid:1', 1, { anchorDate: '2026-09-15' }
+    );
+    const projection = project(3000, [mortgage, n8n]);
+    expect(projection.openingBalance.adjustmentEvents).toHaveLength(2);
+    expect(balanceOn(projection, '2026-09-15')).toBeCloseTo(856.21);
+    expect(applyOperationalFunds(projection, {
+      currentReservedCents: 20000,
+      days: [{ date: '2026-09-15', totalReservedCents: 20000 }],
+    }).openingBalance.availableToSpend).toBeCloseTo(656.21);
+
+    const imported = { ...mortgage, id: 3, date: '2026-09-15', source: 'plaid', tag_ids: [] };
+    const [candidate] = detectDuplicateCandidates({
+      transactions: [mortgage, imported].map(t => normalizeReviewTransaction(t)),
+    });
+    expect(candidate.manual.id).toBe('1');
+    const mergedImport = { ...imported, ...buildMetadataMerge(candidate.manual, candidate.imported).update };
+    expect(mergedImport.tag_ids).toContain(1);
+    const resolved = project(956.21, [mergedImport, n8n]);
+    expect(resolved.openingBalance.adjustmentEvents).toHaveLength(1);
+    expect(balanceOn(resolved, '2026-09-15')).toBeCloseTo(856.21);
+  });
+
   it('projects deterministic daily ledger balances from normalized events', () => {
     const projection = projectCashFlow(
       [checkingAccount],
