@@ -6,7 +6,7 @@ const allocationModeFor = fund => fund.allocationMode || (fundTypeFor(fund) === 
 const isMappedTransaction = (fund, transaction, startDate, endDate, anchorDate) => {
   if (transaction.accountKey !== fund.accountKey) return false;
   if (!fund.categoryIds.includes(Number(transaction.categoryId))) return false;
-  if (transaction.amount >= 0) return false;
+  if (transaction.amount === 0) return false;
   if (transaction.date < startDate || transaction.date > endDate) return false;
   if (transaction.type === 'pending' && transaction.date < anchorDate) return false;
   return transaction.type === 'actual' || transaction.type === 'pending';
@@ -16,7 +16,7 @@ const isFutureMappedTransaction = (fund, transaction, date) =>
   transaction.accountKey === fund.accountKey &&
   fund.categoryIds.includes(Number(transaction.categoryId)) &&
   !fund.excludedTransactionIds.includes(String(transaction.transactionId)) &&
-  transaction.amount < 0 &&
+  transaction.amount !== 0 &&
   transaction.date === date &&
   ['actual', 'pending', 'future'].includes(transaction.type);
 
@@ -32,11 +32,6 @@ const transactionsForPeriod = (fund, transactions, period, throughDate, anchorDa
     excluded: fund.excludedTransactionIds.includes(String(transaction.transactionId)),
   })).sort((left, right) => left.date.localeCompare(right.date) || String(left.transactionId).localeCompare(String(right.transactionId)));
 
-const spentCents = transactions => transactions.reduce(
-  (sum, transaction) => sum + Math.round(Math.abs(transaction.amount) * 100),
-  0
-);
-
 export const getRolloverCarry = (remainingCents, mode, capCents) => {
   if (mode === 'full') return Math.max(0, remainingCents);
   if (mode === 'capped') return Math.min(Math.max(0, remainingCents), Math.max(0, capCents || 0));
@@ -44,18 +39,25 @@ export const getRolloverCarry = (remainingCents, mode, capCents) => {
 };
 
 const annotateTransactions = (transactions, startingCents) => {
-  let remainingCents = Math.max(0, startingCents);
+  let balanceCents = startingCents;
+  let remainingCents = Math.max(0, balanceCents);
   const annotated = transactions.map(transaction => {
-    const spendingCents = Math.round(Math.abs(transaction.amount) * 100);
+    const amountCents = Math.round(transaction.amount * 100);
+    const spendingCents = Math.max(0, -amountCents);
+    const refundCents = Math.max(0, amountCents);
     const potentialCoveredCents = Math.min(remainingCents, spendingCents);
     const potentialOverBudgetCents = spendingCents - potentialCoveredCents;
     const coveredCents = transaction.excluded ? 0 : potentialCoveredCents;
     const overBudgetCents = transaction.excluded ? 0 : potentialOverBudgetCents;
     const startingRemainingCents = remainingCents;
-    remainingCents -= coveredCents;
+    if (!transaction.excluded) balanceCents += amountCents;
+    remainingCents = Math.max(0, balanceCents);
+    const restoredCents = Math.max(0, remainingCents - startingRemainingCents);
     return {
       ...transaction,
       spendingCents,
+      refundCents,
+      restoredCents,
       startingRemainingCents,
       coveredCents,
       overBudgetCents,
@@ -64,7 +66,7 @@ const annotateTransactions = (transactions, startingCents) => {
       potentialOverBudgetCents,
     };
   });
-  return { annotated, remainingCents };
+  return { annotated, remainingCents, balanceCents };
 };
 
 const stateForPeriod = (fund, period, allocationCents, carryInCents, transactions, throughDate, anchorDate) => {
@@ -77,6 +79,7 @@ const stateForPeriod = (fund, period, allocationCents, carryInCents, transaction
     allocationCents,
     carryInCents,
     remainingCents: drawdown.remainingCents,
+    balanceCents: drawdown.balanceCents,
     calculatedThrough: throughDate,
     periodTransactions: drawdown.annotated,
   };
@@ -197,6 +200,7 @@ export const projectOperationalFunds = ({ funds, checkpoints = new Map(), transa
     fund.id,
     {
       ...publicFundState(fund, state),
+      balanceCents: state.balanceCents,
       nextPeriodStart: getPeriodForDate(fund, state.periodStart).nextStart,
       projectedReserveCents: state.remainingCents,
     },
@@ -233,6 +237,7 @@ export const projectOperationalFunds = ({ funds, checkpoints = new Map(), transa
             ...fundState,
             carryInCents,
             remainingCents: resultingRemainingCents,
+            balanceCents: resultingRemainingCents,
             projectedReserveCents,
             periodStart: date,
             periodEnd: period.end,
@@ -241,20 +246,26 @@ export const projectOperationalFunds = ({ funds, checkpoints = new Map(), transa
         }
 
         const todaysTransactions = transactions.filter(transaction => isFutureMappedTransaction(fund, transaction, date));
-        const spendingCents = spentCents(todaysTransactions);
-        const coveredCents = Math.min(fundState.remainingCents, spendingCents);
-        if (spendingCents > 0) {
+        const drawdown = annotateTransactions(todaysTransactions, fundState.balanceCents);
+        const spendingCents = drawdown.annotated.reduce((sum, transaction) => sum + transaction.spendingCents, 0);
+        const refundCents = drawdown.annotated.reduce((sum, transaction) => sum + transaction.refundCents, 0);
+        const coveredCents = drawdown.annotated.reduce((sum, transaction) => sum + transaction.coveredCents, 0);
+        const restoredCents = drawdown.annotated.reduce((sum, transaction) => sum + transaction.restoredCents, 0);
+        if (spendingCents > 0 || refundCents > 0) {
           transactionDrawdowns.push({
             fundId: fund.id,
             name: fund.name,
             spendingCents,
             coveredCents,
-            remainingCents: fundState.remainingCents - coveredCents,
+            refundCents,
+            restoredCents,
+            remainingCents: drawdown.remainingCents,
           });
           fundState = {
             ...fundState,
-            remainingCents: fundState.remainingCents - coveredCents,
-            projectedReserveCents: fundState.projectedReserveCents - coveredCents,
+            remainingCents: drawdown.remainingCents,
+            balanceCents: drawdown.balanceCents,
+            projectedReserveCents: fundState.projectedReserveCents - coveredCents + restoredCents,
           };
         }
         runningFunds.set(fund.id, fundState);

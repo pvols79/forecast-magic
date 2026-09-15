@@ -7,6 +7,7 @@ import { formatCurrency } from '../../utils';
 
 const transactionStatus = transaction => {
   if (transaction.excluded) return { label: 'Excluded', colorScheme: 'gray' };
+  if (transaction.amount > 0) return { label: 'Refund', colorScheme: 'blue' };
   if (transaction.overBudgetCents > 0) return { label: 'Over budget', colorScheme: 'red' };
   return { label: 'Covered', colorScheme: 'green' };
 };
@@ -49,8 +50,8 @@ const FundTransactionsModal = ({ isOpen, onClose, fund, canManageExclusions = fa
                 <Tr>
                   <Th>Date</Th>
                   <Th>Payee</Th>
-                  <Th isNumeric>Spending</Th>
-                  <Th isNumeric>Covered</Th>
+                  <Th isNumeric>Amount</Th>
+                  <Th isNumeric>Covered / restored</Th>
                   <Th isNumeric>Over budget</Th>
                   <Th isNumeric>Remaining</Th>
                   <Th>Status</Th>
@@ -64,8 +65,8 @@ const FundTransactionsModal = ({ isOpen, onClose, fund, canManageExclusions = fa
                     <Tr key={transaction.transactionId} opacity={transaction.excluded ? 0.6 : 1}>
                       <Td whiteSpace="nowrap">{transaction.date}</Td>
                       <Td>{transaction.description}</Td>
-                      <Td isNumeric>{formatCurrency(transaction.spendingCents / 100)}</Td>
-                      <Td isNumeric>{transaction.excluded ? '-' : formatCurrency(transaction.coveredCents / 100)}</Td>
+                      <Td isNumeric>{transaction.amount > 0 ? '+' : ''}{formatCurrency(transaction.amount)}</Td>
+                      <Td isNumeric>{transaction.excluded ? '-' : formatCurrency((transaction.amount > 0 ? transaction.restoredCents : transaction.coveredCents) / 100)}</Td>
                       <Td isNumeric color={transaction.overBudgetCents > 0 ? 'red.500' : undefined}>
                         {transaction.excluded ? '-' : formatCurrency(transaction.overBudgetCents / 100)}
                       </Td>

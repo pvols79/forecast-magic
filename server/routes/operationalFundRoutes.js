@@ -15,6 +15,8 @@ export const sanitizeProjection = (projection, isAdmin) => {
     type: transaction.type,
     excluded: transaction.excluded,
     spendingCents: transaction.spendingCents,
+    refundCents: transaction.refundCents,
+    restoredCents: transaction.restoredCents,
     startingRemainingCents: transaction.startingRemainingCents,
     coveredCents: transaction.coveredCents,
     overBudgetCents: transaction.overBudgetCents,

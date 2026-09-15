@@ -39,6 +39,45 @@ const project = (funds, transactions = [], checkpoints = new Map(), endDate = '2
   projectOperationalFunds({ funds, transactions, checkpoints, anchorDate: '2026-08-13', endDate });
 
 describe('Operational Fund engine', () => {
+  it('shows Wedding charges and refunds and restores the original reservation', () => {
+    const fund = makeFund({ fundType: 'reserved', allocationMode: 'manual', periodType: 'all-time', allocationCents: 130000 });
+    const transactions = [
+      transaction({ transactionId: 1, date: '2026-08-11', amount: -482.90 }),
+      transaction({ transactionId: 2, date: '2026-08-11', amount: -389.32 }),
+      transaction({ transactionId: 3, amount: 482.90 }),
+      transaction({ transactionId: 4, amount: 389.32 }),
+      transaction({ transactionId: 5, amount: 100, categoryId: 99 }),
+      transaction({ transactionId: 6, amount: 100, accountKey: 'plaid:2' }),
+    ];
+    const state = calculateCurrentFundState(fund, null, transactions, '2026-08-13');
+    expect(state.remainingCents).toBe(130000);
+    expect(state.periodTransactions).toHaveLength(4);
+    expect(state.periodTransactions.slice(2).map(t => t.restoredCents)).toEqual([48290, 38932]);
+    const excluded = calculateCurrentFundState({ ...fund, excludedTransactionIds: ['3', '4'] }, null, transactions, '2026-08-13');
+    expect(excluded.remainingCents).toBe(42778);
+    expect(excluded.periodTransactions.slice(2).every(t => t.excluded && t.restoredCents === 0)).toBe(true);
+  });
+
+  it('offsets overspending before a refund restores spendable Fund reserves', () => {
+    const state = calculateCurrentFundState(makeFund({ allocationCents: 5000 }), null, [
+      transaction({ transactionId: 1, amount: -80 }),
+      transaction({ transactionId: 2, amount: 20 }),
+      transaction({ transactionId: 3, amount: 60 }),
+    ], '2026-08-13');
+    expect(state.remainingCents).toBe(5000);
+    expect(state.periodTransactions.map(t => t.remainingAfterCents)).toEqual([0, 0, 5000]);
+    expect(state.periodTransactions.map(t => t.restoredCents)).toEqual([0, 0, 5000]);
+  });
+
+  it('restores a future refund on its date without changing net available cash for covered spending', () => {
+    const result = project([makeFund({ allocationCents: 5000 })], [
+      transaction({ transactionId: 1, date: '2026-08-14', amount: -80, type: 'future' }),
+      transaction({ transactionId: 2, date: '2026-08-15', amount: 80, type: 'future' }),
+    ], new Map(), '2026-08-16');
+    expect(result.days.map(d => d.totalReservedCents)).toEqual([5000, 0, 5000, 5000]);
+    expect(result.days[2].transactionDrawdowns[0]).toMatchObject({ refundCents: 8000, restoredCents: 5000 });
+  });
+
   it('reserves basic periodic and all-time Funds', () => {
     const result = project([
       makeFund({ id: 1 }),
