@@ -58,6 +58,30 @@ describe('financial audit domain', () => {
     expect(findTagComplianceIssues([transaction]).untaggedN8nCandidates).toEqual([]);
   });
 
+  it('recognizes n8n-created transactions from non-CapOne workflows', () => {
+    const fromVenmoNote = normalizeAuditTransaction({
+      id: 4,
+      plaid_account_id: 1,
+      date: '2026-10-02',
+      amount: '40.00',
+      payee: 'Venmo',
+      source: 'api',
+      notes: 'Created from Venmo Gmail alert by n8n.',
+    });
+    const fromVenmoExternalId = normalizeAuditTransaction({
+      id: 5,
+      plaid_account_id: 1,
+      date: '2026-10-02',
+      amount: '40.00',
+      payee: 'Venmo',
+      source: 'api',
+      external_id: 'n8n-venmo-gmail-message-id',
+    });
+
+    expect(fromVenmoNote).toMatchObject({ isN8n: true });
+    expect(fromVenmoExternalId).toMatchObject({ isN8n: true });
+  });
+
   it('parses a Capital One export into internal inflow and outflow signs', () => {
     const statement = parseCapitalOneCsv([
       'Transaction Date,Transaction Description,Transaction Type,Transaction Amount,Balance',

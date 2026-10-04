@@ -21,9 +21,9 @@ const fingerprints = (manualRaw, importedRaw) => ({
   importedFingerprint: transactionFingerprint(normalizeReviewTransaction(importedRaw)),
 });
 
-const setup = ({ updateError, deleteError, manualSource = 'manual' } = {}) => {
+const setup = ({ updateError, updateReturn, deleteError, manualSource = 'manual' } = {}) => {
   const manual = raw({ id: 1, source: manualSource });
-  const imported = raw({
+  let imported = raw({
     id: 2, source: 'plaid', date: '2026-08-15', payee: 'SPOTIFY USA',
     category_id: 11, notes: 'Imported note', tag_ids: [2],
   });
@@ -37,7 +37,9 @@ const setup = ({ updateError, deleteError, manualSource = 'manual' } = {}) => {
     updateTransaction: vi.fn(async (id, update) => {
       calls.push(['update', String(id), update]);
       if (updateError) throw updateError;
-      return { ...imported, ...update };
+      if (updateReturn !== undefined) return updateReturn;
+      imported = { ...imported, ...update };
+      return imported;
     }),
     deleteTransaction: vi.fn(async id => {
       calls.push(['delete', String(id)]);
@@ -79,6 +81,18 @@ describe('DuplicateReviewService', () => {
     });
     expect(calls[0][2]).not.toHaveProperty('date');
     expect(calls[0][2]).not.toHaveProperty('amount');
+    expect(result).toMatchObject({ keptTransactionId: '2', deletedTransactionId: '1' });
+  });
+
+  it('re-fetches the imported transaction when Lunch Money update response is sparse', async () => {
+    const { service, manual, imported, calls } = setup({ updateReturn: { id: 2 } });
+
+    const result = await service.resolve({
+      accountKey: 'plaid:1', manualTransactionId: '1', importedTransactionId: '2',
+      ...fingerprints(manual, imported),
+    });
+
+    expect(calls.map(call => call.slice(0, 2))).toEqual([['update', '2'], ['delete', '1']]);
     expect(result).toMatchObject({ keptTransactionId: '2', deletedTransactionId: '1' });
   });
 

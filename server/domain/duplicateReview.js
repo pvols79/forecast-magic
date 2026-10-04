@@ -3,6 +3,15 @@ import crypto from 'node:crypto';
 const DAY_MS = 24 * 60 * 60 * 1000;
 const USER_ENTERED_SOURCES = new Set(['manual', 'api', 'recurring']);
 const IMPORTED_SOURCE = 'plaid';
+const N8N_NOTE_PATTERN = /created from .* by n8n/i;
+const N8N_EXTERNAL_ID_PATTERN = /^n8n-/i;
+const AUTOMATION_TAG_NAMES = new Set([
+  'forecastmagicpending',
+  'lmmanual',
+  'n8nproc',
+  'n8nprocessed',
+  'n8ncreated',
+]);
 const STANDARD_MAX_DATE_DIFFERENCE_DAYS = 3;
 const API_SETTLEMENT_MAX_DATE_DIFFERENCE_DAYS = 5;
 
@@ -31,6 +40,19 @@ export const normalizePayee = value => String(value || '')
   .replace(/[^a-z0-9\s]/g, ' ')
   .replace(/\s+/g, ' ')
   .trim();
+
+const normalizeTagName = value => String(value || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+
+const isAutomationCreated = transaction => {
+  const notes = String(transaction.notes || '');
+  const externalId = transaction.external_id == null ? '' : String(transaction.external_id);
+  const tagNames = transaction.tag_names || transaction.tags || [];
+  return N8N_NOTE_PATTERN.test(notes)
+    || N8N_EXTERNAL_ID_PATTERN.test(externalId)
+    || tagNames.some(tag => AUTOMATION_TAG_NAMES.has(normalizeTagName(
+      typeof tag === 'string' ? tag : tag?.name
+    )));
+};
 
 const bigrams = value => {
   if (value.length < 2) return value ? [value] : [];
@@ -65,6 +87,12 @@ export const normalizeReviewTransaction = (transaction, categoryNames = new Map(
   const accountKey = getTransactionAccountKey(transaction);
   const apiAmount = asNumber(transaction.to_base ?? transaction.amount);
   if (!transaction.id || !accountKey || apiAmount == null || !transaction.date) return null;
+  const automationCreated = isAutomationCreated(transaction);
+  const origin = USER_ENTERED_SOURCES.has(source)
+    ? 'manual'
+    : source === IMPORTED_SOURCE
+      ? automationCreated ? 'other' : 'imported'
+      : automationCreated ? 'manual' : 'other';
 
   return {
     id: asId(transaction.id),
@@ -82,10 +110,11 @@ export const normalizeReviewTransaction = (transaction, categoryNames = new Map(
     recurringId: transaction.recurring_id == null ? null : asId(transaction.recurring_id),
     recurringName: transaction.recurring_id == null ? null : `Recurring #${transaction.recurring_id}`,
     source,
-    // Lunch Money labels entries created through its API as "api" and entries
-    // created from a recurring item as "recurring". Both are user-authored
-    // candidates for the same created-versus-imported workflow.
-    origin: USER_ENTERED_SOURCES.has(source) ? 'manual' : source === IMPORTED_SOURCE ? 'imported' : 'other',
+    // Lunch Money labels API-created placeholders as "api" in the normal case.
+    // A Plaid row with n8n/Forecast Magic markers is usually a previously
+    // resolved import that inherited placeholder metadata, so exclude it from
+    // duplicate suggestions instead of treating it as a fresh bank import.
+    origin,
     isPending: Boolean(transaction.is_pending),
     updatedAt: transaction.updated_at || null,
   };
@@ -164,6 +193,26 @@ const scorePair = (manual, imported) => {
 
 const confidenceRank = { high: 0, medium: 1, low: 2 };
 
+const pairPriority = candidate => {
+  const sameCategory = candidate.manual.categoryId != null
+    && candidate.manual.categoryId === candidate.imported.categoryId;
+  const sameRecurring = candidate.manual.recurringId != null
+    && candidate.manual.recurringId === candidate.imported.recurringId;
+  return (candidate.payeeSimilarity * 100)
+    + (sameRecurring ? 20 : 0)
+    + (sameCategory ? 10 : 0)
+    - (candidate.daysApart * 5);
+};
+
+const compareCandidates = (left, right) => (
+  confidenceRank[left.confidence] - confidenceRank[right.confidence]
+  || pairPriority(right) - pairPriority(left)
+  || left.daysApart - right.daysApart
+  || right.payeeSimilarity - left.payeeSimilarity
+  || left.imported.date.localeCompare(right.imported.date)
+  || left.id.localeCompare(right.id)
+);
+
 export const detectDuplicateCandidates = ({ transactions, ignoredPairIds = new Set(), includeLow = false }) => {
   const groups = new Map();
   for (const transaction of transactions) {
@@ -187,7 +236,16 @@ export const detectDuplicateCandidates = ({ transactions, ignoredPairIds = new S
     }
   }
 
-  return candidates.sort((left, right) => (
+  const selected = [];
+  const selectedManualIds = new Set();
+  const selectedImportedIds = new Set();
+  for (const candidate of candidates.sort(compareCandidates)) {
+    if (selectedManualIds.has(candidate.manual.id) || selectedImportedIds.has(candidate.imported.id)) continue;
+    selected.push(candidate);
+    selectedManualIds.add(candidate.manual.id);
+    selectedImportedIds.add(candidate.imported.id);
+  }
+  return selected.sort((left, right) => (
     confidenceRank[left.confidence] - confidenceRank[right.confidence]
     || left.imported.date.localeCompare(right.imported.date)
     || left.id.localeCompare(right.id)
@@ -202,6 +260,7 @@ const combineNotes = (manualNotes, importedNotes) => {
 };
 
 export const buildMetadataMerge = (manual, imported, options = {}) => {
+  const payeeConflict = Boolean(manual.payee && imported.payee && manual.payee.trim() !== imported.payee.trim());
   const categoryConflict = manual.categoryId != null
     && imported.categoryId != null
     && manual.categoryId !== imported.categoryId;
@@ -224,22 +283,29 @@ export const buildMetadataMerge = (manual, imported, options = {}) => {
   if (imported.recurringId == null && manual.recurringId != null) recurringId = manual.recurringId;
   else if (recurringConflict && options.recurringPreference === 'manual') recurringId = manual.recurringId;
 
+  let payee = manual.payee || imported.payee;
+  if (options.payeePreference === 'imported') payee = imported.payee || manual.payee;
+  else if (options.payeePreference === 'specified' && options.specifiedPayee?.trim()) {
+    payee = options.specifiedPayee.trim();
+  }
+
   const tagIds = unique([...imported.tagIds, ...manual.tagIds]).sort((a, b) => a - b);
   return {
     update: {
-      payee: manual.payee || imported.payee,
+      payee,
       category_id: categoryId,
       notes,
       tag_ids: tagIds,
       recurring_id: recurringId,
     },
     conflicts: {
+      payee: payeeConflict,
       category: categoryConflict,
       notes: notesConflict,
       recurring: recurringConflict,
     },
     summary: [
-      manual.payee ? `Use manual payee: ${manual.payee}` : null,
+      payee ? `Use payee: ${payee}` : null,
       categoryId != null ? `Use category: ${categoryId === manual.categoryId ? manual.categoryName : imported.categoryName}` : null,
       notes ? (notesConflict ? 'Merge or preserve both transaction notes' : 'Copy available notes') : null,
       tagIds.length ? `Keep ${tagIds.length} unique tag${tagIds.length === 1 ? '' : 's'}` : null,

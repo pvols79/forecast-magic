@@ -4,7 +4,8 @@ import { payeeSimilarity } from './duplicateReview.js';
 import { getTransactionBalanceTreatment } from '../../src/transactionBalance.js';
 
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
-const N8N_NOTE_PATTERN = /created from capital one gmail alert by n8n/i;
+const N8N_NOTE_PATTERN = /created from .* by n8n/i;
+const N8N_EXTERNAL_ID_PATTERN = /^n8n-/i;
 const PENDING_TAG_NAMES = new Set(['forecastmagicpending']);
 const N8N_TAG_NAMES = new Set(['n8nproc', 'n8nprocessed', 'n8ncreated']);
 
@@ -68,7 +69,7 @@ export const normalizeAuditTransaction = (transaction, tagNamesById = new Map())
   const externalId = transaction.external_id == null ? null : String(transaction.external_id);
   const notes = String(transaction.notes || '');
   const isN8n = N8N_NOTE_PATTERN.test(notes)
-    || externalId?.startsWith('n8n-capone-gmail-')
+    || N8N_EXTERNAL_ID_PATTERN.test(externalId || '')
     || [...normalizedTags].some(tag => N8N_TAG_NAMES.has(tag));
   const hasPendingTag = [...normalizedTags].some(tag => PENDING_TAG_NAMES.has(tag));
   const result = {

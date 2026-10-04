@@ -109,4 +109,5 @@ describe('Financial Audit API', () => {
     expect(preview.stack).toHaveLength(3);
     expect(commit.stack).toHaveLength(3);
   });
+
 });

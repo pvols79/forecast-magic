@@ -162,6 +162,44 @@ describe('duplicate transaction detection', () => {
     ])).toEqual([]);
   });
 
+  it('excludes a plaid-source row with n8n notes from duplicate suggestions', () => {
+    const alreadyResolvedImport = transaction({
+      id: 1,
+      source: 'plaid',
+      notes: 'Created from Capital One Gmail alert by n8n.',
+    });
+    expect(alreadyResolvedImport).toMatchObject({ origin: 'other' });
+    expect(scan([
+      transaction({ id: 2, source: 'api' }),
+      alreadyResolvedImport,
+    ], { includeLow: true })).toEqual([]);
+    expect(scan([
+      alreadyResolvedImport,
+      transaction({ id: 3, source: 'plaid', notes: '' }),
+    ], { includeLow: true })).toEqual([]);
+  });
+
+  it('excludes plaid-source rows marked by non-CapOne n8n workflows', () => {
+    const byNote = transaction({
+      id: 1,
+      source: 'plaid',
+      notes: 'Created from Venmo Gmail alert by n8n.',
+    });
+    const byExternalId = transaction({
+      id: 2,
+      source: 'plaid',
+      external_id: 'n8n-venmo-gmail-message-id',
+    });
+
+    expect(byNote).toMatchObject({ origin: 'other' });
+    expect(byExternalId).toMatchObject({ origin: 'other' });
+    expect(scan([
+      transaction({ id: 3, source: 'api' }),
+      byNote,
+      byExternalId,
+    ], { includeLow: true })).toEqual([]);
+  });
+
   it('suppresses only the exact ignored pair', () => {
     const manual = transaction({ id: 1, source: 'manual' });
     const firstImported = transaction({ id: 2, source: 'plaid' });
@@ -170,6 +208,34 @@ describe('duplicate transaction detection', () => {
       ignoredPairIds: new Set(['1:2']),
     });
     expect(candidates.map(candidate => candidate.id)).toEqual(['1:3']);
+  });
+
+  it('keeps only the best one-to-one pairings for repeated Venmo charges', () => {
+    const candidates = scan([
+      transaction({ id: 'manual-21-75', source: 'api', date: '2026-09-21', payee: 'VENMO', amount: '75.00', category_id: null }),
+      transaction({ id: 'manual-22-30', source: 'api', date: '2026-09-22', payee: 'VENMO', amount: '30.00', category_id: null }),
+      transaction({ id: 'manual-25-30', source: 'api', date: '2026-09-25', payee: 'VENMO', amount: '30.00', category_id: null }),
+      transaction({ id: 'imported-21-venmo-75', source: 'plaid', date: '2026-09-21', payee: 'Venmo', amount: '75.00', category_id: 10 }),
+      transaction({ id: 'imported-21-esteban-75', source: 'plaid', date: '2026-09-21', payee: 'Esteban Hernandez', amount: '75.00', category_id: 10 }),
+      transaction({ id: 'imported-22-venmo-30', source: 'plaid', date: '2026-09-22', payee: 'Venmo', amount: '30.00', category_id: 10 }),
+      transaction({ id: 'imported-25-venmo-30', source: 'plaid', date: '2026-09-25', payee: 'Venmo', amount: '30.00', category_id: 10 }),
+    ], { includeLow: true });
+
+    expect(candidates.map(candidate => candidate.id)).toEqual([
+      'manual-21-75:imported-21-venmo-75',
+      'manual-22-30:imported-22-venmo-30',
+      'manual-25-30:imported-25-venmo-30',
+    ]);
+  });
+
+  it('prefers the closest strongest Dutch Bros pairing when same amounts repeat', () => {
+    const candidates = scan([
+      transaction({ id: 'manual-29', source: 'api', date: '2026-09-29', payee: 'Dutch Bros. Coffee', amount: '30.00', category_id: 10 }),
+      transaction({ id: 'imported-25', source: 'plaid', date: '2026-09-25', payee: 'DUTCH BROS', amount: '30.00', category_id: 10 }),
+      transaction({ id: 'imported-01', source: 'plaid', date: '2026-10-01', payee: 'Dutch Bros. Coffee', amount: '30.00', category_id: 10 }),
+    ], { includeLow: true });
+
+    expect(candidates.map(candidate => candidate.id)).toEqual(['manual-29:imported-01']);
   });
 });
 
@@ -197,6 +263,29 @@ describe('duplicate metadata merge', () => {
     expect(merge.update).not.toHaveProperty('date');
     expect(merge.update).not.toHaveProperty('amount');
     expect(merge.update).not.toHaveProperty('plaid_account_id');
-    expect(merge.conflicts).toMatchObject({ category: true, notes: true, recurring: false });
+    expect(merge.conflicts).toMatchObject({ payee: true, category: true, notes: true, recurring: false });
+  });
+
+  it('can keep the imported payee when resolving a duplicate', () => {
+    const manual = transaction({ id: 1, source: 'api', payee: 'Capone Email Name' });
+    const imported = transaction({ id: 2, source: 'plaid', payee: 'Target' });
+
+    const merge = buildMetadataMerge(manual, imported, { payeePreference: 'imported' });
+
+    expect(merge.update.payee).toBe('Target');
+    expect(merge.summary).toContain('Use payee: Target');
+  });
+
+  it('can use a specified payee when resolving a duplicate', () => {
+    const manual = transaction({ id: 1, source: 'api', payee: 'Dirty email payee' });
+    const imported = transaction({ id: 2, source: 'plaid', payee: 'Imported payee' });
+
+    const merge = buildMetadataMerge(manual, imported, {
+      payeePreference: 'specified',
+      specifiedPayee: 'Clean Merchant',
+    });
+
+    expect(merge.update.payee).toBe('Clean Merchant');
+    expect(merge.summary).toContain('Use payee: Clean Merchant');
   });
 });

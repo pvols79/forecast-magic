@@ -71,4 +71,16 @@ export const resolveDuplicateTransactions = async (candidate, preferences) => (
   })
 ).data;
 
+export const reviewDeletedPendingTransactions = async accountKey => (
+  await api.post('/admin-workflow/review-deleted-pending', { accountKey })
+).data;
+
+export const getRecurringSuggestions = async accountKey => (
+  await api.get('/admin-workflow/recurring-suggestions', { params: { accountKey } })
+).data;
+
+export const clearRecurringSuggestions = async (accountKey, transactionIds = []) => (
+  await api.post('/admin-workflow/clear-recurring-suggestions', { accountKey, transactionIds })
+).data;
+
 export const getApiErrorMessage = error => error.response?.data?.error || error.message || 'Unexpected error.';

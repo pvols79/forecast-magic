@@ -2,6 +2,7 @@ import path from 'node:path';
 import express from 'express';
 import { attachAdminStatus } from './auth.js';
 import { config } from './config.js';
+import { createAdminWorkflowRouter } from './routes/adminWorkflowRoutes.js';
 import { createAuthRouter } from './routes/authRoutes.js';
 import { createDuplicateReviewRouter } from './routes/duplicateReviewRoutes.js';
 import { createFinancialAuditRouter } from './routes/financialAuditRoutes.js';
@@ -21,6 +22,7 @@ export const createApp = () => {
   app.use(attachAdminStatus);
 
   app.get('/api/health', (request, response) => response.json({ status: 'ok' }));
+  app.use('/api/admin-workflow', createAdminWorkflowRouter());
   app.use('/api/auth', createAuthRouter());
   app.use('/api/duplicate-review', createDuplicateReviewRouter());
   app.use('/api/financial-audit', createFinancialAuditRouter(financialAuditService));

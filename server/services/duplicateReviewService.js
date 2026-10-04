@@ -14,6 +14,11 @@ const conflictError = message => {
 };
 
 const allowedPreference = (value, allowed, fallback) => allowed.includes(value) ? value : fallback;
+const specifiedPayee = value => {
+  const payee = typeof value === 'string' ? value.trim() : '';
+  if (payee.length > 200) throw conflictError('Specified payee must be 200 characters or less.');
+  return payee;
+};
 
 export class DuplicateReviewService {
   constructor(
@@ -115,12 +120,15 @@ export class DuplicateReviewService {
     validateResolvablePair(manual, imported);
 
     const merge = buildMetadataMerge(manual, imported, {
+      payeePreference: allowedPreference(input.payeePreference, ['manual', 'imported', 'specified'], 'manual'),
+      specifiedPayee: specifiedPayee(input.specifiedPayee),
       categoryPreference: allowedPreference(input.categoryPreference, ['manual', 'imported'], 'manual'),
       notesPreference: allowedPreference(input.notesPreference, ['combine', 'manual', 'imported'], 'combine'),
       recurringPreference: allowedPreference(input.recurringPreference, ['manual', 'imported'], 'imported'),
     });
 
-    const updatedRaw = await this.lunchMoney.updateTransaction(imported.id, merge.update);
+    await this.lunchMoney.updateTransaction(imported.id, merge.update);
+    const updatedRaw = await this.lunchMoney.getTransaction(imported.id);
     const updated = normalizeReviewTransaction(updatedRaw, categoryNames);
     if (!updated || updated.id !== imported.id || updated.origin !== 'imported') {
       throw conflictError('Lunch Money did not confirm the imported transaction update. The manual transaction was not deleted.');

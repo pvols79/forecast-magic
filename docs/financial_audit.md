@@ -126,7 +126,7 @@ Content-Type: application/json
 ```json
 {
   "accountKey": "plaid:123",
-  "externalId": "n8n-capone-gmail-message-id",
+  "externalId": "n8n-<workflow-source>-message-id",
   "emailId": "gmail-message-id",
   "date": "2026-09-06",
   "amountCents": -2194,
@@ -138,7 +138,7 @@ Content-Type: application/json
 
 Amounts follow Forecast Magic's internal convention: positive is money entering the account and negative is money leaving it. The endpoint is idempotent by account and `externalId`.
 
-This evidence call complements the Lunch Money tags. The created Lunch Money transaction should continue to receive `Forecast Magic Pending` until Duplicate Review replaces it with the settled Plaid import.
+Use an `externalId` that starts with `n8n-` for every workflow-created placeholder, such as `n8n-capone-gmail-...` or `n8n-venmo-gmail-...`. This evidence call complements the Lunch Money tags. The created Lunch Money transaction should continue to receive `Forecast Magic Pending` until Duplicate Review replaces it with the settled Plaid import.
 
 ## MCP Connector
 

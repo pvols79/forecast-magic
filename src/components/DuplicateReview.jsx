@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   Alert, AlertIcon, Badge, Box, Button, Checkbox, Flex, FormControl, FormLabel,
-  HStack, Heading, IconButton, ListItem, Modal, ModalBody, ModalCloseButton,
+  HStack, Heading, IconButton, Input, ListItem, Modal, ModalBody, ModalCloseButton,
   ModalContent, ModalFooter, ModalHeader, ModalOverlay, Select, Spinner, Table,
   Tbody, Td, Text as ChakraText, Th, Thead, Tr, UnorderedList, VStack,
   useColorModeValue,
@@ -34,12 +34,16 @@ const TransactionDetails = ({ transaction, label }) => (
 );
 
 const DuplicateConfirmation = ({ candidate, isOpen, onClose, onConfirm, resolving }) => {
+  const [payeePreference, setPayeePreference] = useState('manual');
+  const [specifiedPayee, setSpecifiedPayee] = useState('');
   const [categoryPreference, setCategoryPreference] = useState('manual');
   const [notesPreference, setNotesPreference] = useState('combine');
   const [recurringPreference, setRecurringPreference] = useState('imported');
 
   useEffect(() => {
     if (!candidate) return;
+    setPayeePreference('manual');
+    setSpecifiedPayee(candidate.manual.payee || candidate.imported.payee || '');
     setCategoryPreference('manual');
     setNotesPreference('combine');
     setRecurringPreference('imported');
@@ -70,6 +74,21 @@ const DuplicateConfirmation = ({ candidate, isOpen, onClose, onConfirm, resolvin
             <UnorderedList pl={4} fontSize="sm">
               {candidate.mergePreview.summary.map(item => <ListItem key={item}>{item}</ListItem>)}
             </UnorderedList>
+
+            <FormControl>
+              <FormLabel fontSize="sm">Payee name</FormLabel>
+              <Select value={payeePreference} onChange={event => setPayeePreference(event.target.value)}>
+                <option value="manual">Keep manual: {candidate.manual.payee || 'Unnamed transaction'}</option>
+                <option value="imported">Keep imported: {candidate.imported.payee || 'Unnamed transaction'}</option>
+                <option value="specified">Specify</option>
+              </Select>
+            </FormControl>
+            {payeePreference === 'specified' && (
+              <FormControl>
+                <FormLabel fontSize="sm">Specified payee</FormLabel>
+                <Input value={specifiedPayee} onChange={event => setSpecifiedPayee(event.target.value)} maxLength={200} />
+              </FormControl>
+            )}
 
             {conflicts.category && (
               <FormControl>
@@ -105,7 +124,14 @@ const DuplicateConfirmation = ({ candidate, isOpen, onClose, onConfirm, resolvin
           <Button variant="ghost" onClick={onClose} isDisabled={resolving}>Cancel</Button>
           <Button
             colorScheme="red"
-            onClick={() => onConfirm({ categoryPreference, notesPreference, recurringPreference })}
+            onClick={() => onConfirm({
+              payeePreference,
+              specifiedPayee: specifiedPayee.trim(),
+              categoryPreference,
+              notesPreference,
+              recurringPreference,
+            })}
+            isDisabled={payeePreference === 'specified' && !specifiedPayee.trim()}
             isLoading={resolving}
           >
             Confirm Duplicate
@@ -116,7 +142,7 @@ const DuplicateConfirmation = ({ candidate, isOpen, onClose, onConfirm, resolvin
   );
 };
 
-const DuplicateReview = ({ accountKey, onRefresh }) => {
+const DuplicateReview = ({ accountKey, onRefresh, scanRequest = 0 }) => {
   const [candidates, setCandidates] = useState([]);
   const [showLow, setShowLow] = useState(false);
   const [expanded, setExpanded] = useState(false);
@@ -136,7 +162,7 @@ const DuplicateReview = ({ accountKey, onRefresh }) => {
     setMessage(null);
   }, [accountKey]);
 
-  const scan = async (includeLow = showLow) => {
+  const scan = useCallback(async (includeLow = showLow) => {
     setScanning(true);
     setMessage(null);
     try {
@@ -153,7 +179,11 @@ const DuplicateReview = ({ accountKey, onRefresh }) => {
     } finally {
       setScanning(false);
     }
-  };
+  }, [accountKey, expanded, showLow]);
+
+  useEffect(() => {
+    if (scanRequest > 0) scan();
+  }, [scanRequest, scan]);
 
   const handleLowConfidence = async checked => {
     setShowLow(checked);

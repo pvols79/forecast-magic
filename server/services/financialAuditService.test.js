@@ -171,4 +171,5 @@ describe('FinancialAuditService', () => {
     });
     expect(settlement.evidence.transaction).toMatchObject({ source: 'plaid', amountCents: -4000 });
   });
+
 });

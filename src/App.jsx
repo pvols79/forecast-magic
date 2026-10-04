@@ -17,6 +17,7 @@ import HouseholdFundSummaries from './components/HouseholdFundSummaries';
 import ViewModeControl from './components/ViewModeControl';
 import BrandMark from './components/BrandMark';
 import OperationalFundsManager from './components/operational-funds/OperationalFundsManager';
+import AdminWorkflow from './components/AdminWorkflow';
 import DuplicateReview from './components/DuplicateReview';
 import ShareReportButton from './components/ShareReportButton';
 import { getAccounts, getRecurringItems, getPlaidAccounts, getTransactions } from './lunchmoney';
@@ -64,6 +65,7 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [fundRefresh, setFundRefresh] = useState(0);
+  const [duplicateScanRequest, setDuplicateScanRequest] = useState(0);
   const { colorMode, toggleColorMode } = useColorMode();
 
   const bg = useColorModeValue('brand.100', 'brand.900');
@@ -299,7 +301,18 @@ function App() {
                   <AdminMetrics openingBalance={projection.openingBalance} />
                 )}
                 {isAdminView && authStatus?.isAdmin && selectedAccount && (
-                  <DuplicateReview accountKey={selectedAccountId} onRefresh={handleRefresh} />
+                  <AdminWorkflow
+                    accountKey={selectedAccountId}
+                    onRefresh={handleRefresh}
+                    onRunDuplicates={() => setDuplicateScanRequest(value => value + 1)}
+                  />
+                )}
+                {isAdminView && authStatus?.isAdmin && selectedAccount && (
+                  <DuplicateReview
+                    accountKey={selectedAccountId}
+                    onRefresh={handleRefresh}
+                    scanRequest={duplicateScanRequest}
+                  />
                 )}
                 <Box bg={panelBg} borderRadius="md" borderWidth="1px" boxShadow="sm" overflow="hidden">
                   <Box px={{ base: 4, lg: 5 }} pt={4}>
