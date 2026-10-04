@@ -47,7 +47,7 @@ describe('AdminWorkflowService', () => {
         {
           id: 8,
           status: 'suggested',
-          transaction_criteria: { plaid_account_id: 10, payee: 'Empty', amount: '8.00' },
+          transaction_criteria: { plaid_account_id: 10, payee: 'Linked but not found', amount: '8.00' },
           matches: { found_transactions: [] },
         },
         {
@@ -61,6 +61,7 @@ describe('AdminWorkflowService', () => {
         { id: 100, plaid_account_id: 10, recurring_id: 7 },
         { id: 101, plaid_account_id: 10, recurring_id: 7 },
         { id: 102, plaid_account_id: 10, recurring_id: 7 },
+        { id: 103, plaid_account_id: 10, recurring_id: 8 },
         { id: 200, plaid_account_id: 11, recurring_id: 9 },
       ]),
     };
@@ -73,8 +74,11 @@ describe('AdminWorkflowService', () => {
       end_date: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
     });
     expect(result).toMatchObject({
-      count: 1,
-      suggestions: [{ id: 7, accountKey: 'plaid:10', transactionIds: [100, 101, 102] }],
+      count: 2,
+      suggestions: [
+        { id: 7, accountKey: 'plaid:10', transactionIds: [100, 101, 102] },
+        { id: 8, accountKey: 'plaid:10', transactionIds: [103] },
+      ],
     });
   });
 

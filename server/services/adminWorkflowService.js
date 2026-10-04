@@ -80,13 +80,12 @@ export class AdminWorkflowService {
     const today = new Date();
     const startDate = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth() - 1, 1))
       .toISOString().slice(0, 10);
-    const endDate = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 0))
-      .toISOString().slice(0, 10);
+    const endDate = today.toISOString().slice(0, 10);
     const suggestions = filterByAccount(
       await this.lunchMoney.getSuggestedRecurringItems({ start_date: startDate, end_date: endDate }),
       accountKeyFilter,
       recurringAccountKey
-    ).filter(suggestion => suggestionTransactionIds(suggestion).length > 0);
+    );
     const suggestionIds = new Set(suggestions.map(suggestion => Number(suggestion.id)));
     const linkedTransactions = await this.lunchMoney.getAllRawTransactions({
       include_metadata: true,
