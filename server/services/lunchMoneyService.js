@@ -16,6 +16,27 @@ const toNumber = value => {
 };
 
 const accountKey = (source, id) => `${source}:${id}`;
+const sleep = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+const retryDelayMs = error => {
+  const retryAfter = error.response?.headers?.['retry-after'];
+  const seconds = Number(retryAfter);
+  if (Number.isFinite(seconds) && seconds > 0) return Math.min(seconds * 1000, 15_000);
+  const date = Date.parse(retryAfter);
+  if (Number.isFinite(date)) return Math.min(Math.max(date - Date.now(), 1000), 15_000);
+  return 2000;
+};
+
+const dateDistanceDays = (left, right) => {
+  const a = new Date(`${left}T00:00:00Z`);
+  const b = new Date(`${right}T00:00:00Z`);
+  if (Number.isNaN(a.getTime()) || Number.isNaN(b.getTime())) return Number.POSITIVE_INFINITY;
+  return Math.round(Math.abs(a.getTime() - b.getTime()) / DAY_MS);
+};
+
+const isSatisfiedByNearbyFoundTransaction = (missingDate, foundTransactions, maxDays = 3) =>
+  foundTransactions.some(match => match.date && dateDistanceDays(missingDate, match.date) <= maxDays);
 
 export class LunchMoneyService {
   constructor(settingsRepository = new SettingsRepository()) {
@@ -47,11 +68,19 @@ export class LunchMoneyService {
       error.status = 401;
       throw error;
     }
-    const response = await axios.get(`${config.lunchMoneyBaseUrl}${path}`, {
-      headers: { Authorization: `Bearer ${apiKey}` },
-      params,
-    });
-    return response.data;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        const response = await axios.get(`${config.lunchMoneyBaseUrl}${path}`, {
+          headers: { Authorization: `Bearer ${apiKey}` },
+          params,
+        });
+        return response.data;
+      } catch (error) {
+        if (error.response?.status !== 429 || attempt === 2) throw error;
+        await sleep(retryDelayMs(error));
+      }
+    }
+    return null;
   }
 
   async put(path, data, params = {}) {
@@ -136,7 +165,10 @@ export class LunchMoneyService {
     const source = criteria.manual_account_id != null || criteria.asset_id != null ? 'manual' : 'plaid';
     const id = criteria.manual_account_id ?? criteria.asset_id ?? criteria.plaid_account_id;
     if (id == null) return [];
-    return (matches.missing_transaction_dates || matches.missing_dates_within_range || []).map(date => ({
+    const foundTransactions = matches.found_transactions || matches.transactions_within_range || [];
+    return (matches.missing_transaction_dates || matches.missing_dates_within_range || [])
+      .filter(date => !isSatisfiedByNearbyFoundTransaction(date, foundTransactions))
+      .map(date => ({
       id: `recurring:${item.id}:${date}`,
       accountId: id,
       accountSource: source,
@@ -239,6 +271,26 @@ export class LunchMoneyService {
     return unwrapList(data, 'transactions');
   }
 
+  async getAllRawTransactions(params = {}) {
+    const limit = 2000;
+    let offset = 0;
+    const transactions = [];
+    let hasMore = true;
+    while (hasMore) {
+      const data = await this.get('/transactions', {
+        include_pending: true,
+        limit,
+        offset,
+        ...params,
+      });
+      const page = unwrapList(data, 'transactions');
+      transactions.push(...page);
+      hasMore = Boolean(data?.has_more) || page.length === limit;
+      offset += limit;
+    }
+    return transactions;
+  }
+
   async getTransaction(transactionId) {
     const data = await this.get(`/transactions/${transactionId}`);
     return data?.transaction || data;
@@ -249,8 +301,41 @@ export class LunchMoneyService {
     return data?.transaction || data;
   }
 
+  async bulkUpdateTransactions(transactions) {
+    const data = await this.put('/transactions', { transactions });
+    return unwrapList(data, 'transactions');
+  }
+
   async deleteTransaction(transactionId) {
     await this.delete(`/transactions/${transactionId}`);
+    return true;
+  }
+
+  async getSuggestedRecurringItems(params = {}) {
+    let data;
+    try {
+      data = await this.get('/recurring_items', { include_suggested: true, ...params });
+    } catch (error) {
+      if (error.response?.status !== 404) throw error;
+      data = await this.get('/recurring', { include_suggested: true, ...params });
+    }
+    const items = unwrapList(data, 'recurring_items');
+    const recurringItems = items.length > 0 ? items : unwrapList(data, 'recurring');
+    return recurringItems.filter(item => (
+      item.status === 'suggested'
+      || item.status === 'recurring_suggested'
+      || item.is_suggested === true
+      || item.suggested === true
+    ));
+  }
+
+  async deleteRecurringItem(recurringItemId) {
+    try {
+      await this.delete(`/recurring_items/${recurringItemId}`);
+    } catch (error) {
+      if (error.response?.status !== 404) throw error;
+      await this.delete(`/recurring/${recurringItemId}`);
+    }
     return true;
   }
 
