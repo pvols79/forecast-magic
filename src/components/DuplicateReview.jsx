@@ -3,7 +3,7 @@ import {
   Alert, AlertIcon, Badge, Box, Button, Checkbox, Flex, FormControl, FormLabel,
   HStack, Heading, IconButton, Input, ListItem, Modal, ModalBody, ModalCloseButton,
   ModalContent, ModalFooter, ModalHeader, ModalOverlay, Select, Spinner, Table,
-  Tbody, Td, Text as ChakraText, Th, Thead, Tr, UnorderedList, VStack,
+  Tbody, Td, Textarea, Text as ChakraText, Th, Thead, Tr, UnorderedList, VStack,
   useColorModeValue,
 } from '@chakra-ui/react';
 import { FaChevronDown, FaChevronUp, FaSearch, FaSyncAlt } from 'react-icons/fa';
@@ -14,6 +14,8 @@ import {
 import { formatCurrency } from '../utils';
 
 const confidenceScheme = { high: 'green', medium: 'orange', low: 'gray' };
+
+const tagLabel = tag => String(tag || '').replace(/_/g, ' ');
 
 const TransactionDetails = ({ transaction, label }) => (
   <VStack align="stretch" spacing={0.5} minW="200px">
@@ -26,6 +28,11 @@ const TransactionDetails = ({ transaction, label }) => (
     <ChakraText fontSize="xs" color="gray.500">
       {transaction.notes ? `Notes: ${transaction.notes}` : 'No notes'}
     </ChakraText>
+    {transaction.tagNames?.length > 0 && (
+      <Flex gap={1} wrap="wrap">
+        {transaction.tagNames.map(tag => <Badge key={tag} size="sm" variant="outline">{tagLabel(tag)}</Badge>)}
+      </Flex>
+    )}
     <ChakraText fontSize="xs" color="gray.500">
       {transaction.recurringName || 'No recurring relationship'}
     </ChakraText>
@@ -38,6 +45,7 @@ const DuplicateConfirmation = ({ candidate, isOpen, onClose, onConfirm, resolvin
   const [specifiedPayee, setSpecifiedPayee] = useState('');
   const [categoryPreference, setCategoryPreference] = useState('manual');
   const [notesPreference, setNotesPreference] = useState('combine');
+  const [specifiedNotes, setSpecifiedNotes] = useState('');
   const [recurringPreference, setRecurringPreference] = useState('imported');
 
   useEffect(() => {
@@ -46,6 +54,7 @@ const DuplicateConfirmation = ({ candidate, isOpen, onClose, onConfirm, resolvin
     setSpecifiedPayee(candidate.manual.payee || candidate.imported.payee || '');
     setCategoryPreference('manual');
     setNotesPreference('combine');
+    setSpecifiedNotes(candidate.mergePreview.update.notes || '');
     setRecurringPreference('imported');
   }, [candidate]);
 
@@ -75,6 +84,21 @@ const DuplicateConfirmation = ({ candidate, isOpen, onClose, onConfirm, resolvin
               {candidate.mergePreview.summary.map(item => <ListItem key={item}>{item}</ListItem>)}
             </UnorderedList>
 
+            <Flex gap={3} direction={{ base: 'column', md: 'row' }}>
+              <Box flex="1" borderWidth="1px" borderRadius="md" p={3}>
+                <ChakraText fontSize="xs" fontWeight="bold" mb={1}>Manual/API notes</ChakraText>
+                <ChakraText fontSize="xs" whiteSpace="pre-wrap" color="gray.600">
+                  {candidate.manual.notes || 'No notes'}
+                </ChakraText>
+              </Box>
+              <Box flex="1" borderWidth="1px" borderRadius="md" p={3}>
+                <ChakraText fontSize="xs" fontWeight="bold" mb={1}>Imported notes</ChakraText>
+                <ChakraText fontSize="xs" whiteSpace="pre-wrap" color="gray.600">
+                  {candidate.imported.notes || 'No notes'}
+                </ChakraText>
+              </Box>
+            </Flex>
+
             <FormControl>
               <FormLabel fontSize="sm">Payee name</FormLabel>
               <Select value={payeePreference} onChange={event => setPayeePreference(event.target.value)}>
@@ -99,14 +123,24 @@ const DuplicateConfirmation = ({ candidate, isOpen, onClose, onConfirm, resolvin
                 </Select>
               </FormControl>
             )}
-            {conflicts.notes && (
+            <FormControl>
+              <FormLabel fontSize="sm">{conflicts.notes ? 'Notes conflict' : 'Notes'}</FormLabel>
+              <Select value={notesPreference} onChange={event => setNotesPreference(event.target.value)}>
+                <option value="combine">Combine both notes</option>
+                <option value="manual">Keep manual notes only</option>
+                <option value="imported">Keep imported notes only</option>
+                <option value="specified">Specify notes</option>
+              </Select>
+            </FormControl>
+            {notesPreference === 'specified' && (
               <FormControl>
-                <FormLabel fontSize="sm">Notes conflict</FormLabel>
-                <Select value={notesPreference} onChange={event => setNotesPreference(event.target.value)}>
-                  <option value="combine">Combine both notes</option>
-                  <option value="manual">Keep manual notes only</option>
-                  <option value="imported">Keep imported notes only</option>
-                </Select>
+                <FormLabel fontSize="sm">Specified notes</FormLabel>
+                <Textarea
+                  value={specifiedNotes}
+                  onChange={event => setSpecifiedNotes(event.target.value)}
+                  maxLength={2000}
+                  rows={5}
+                />
               </FormControl>
             )}
             {conflicts.recurring && (
@@ -129,6 +163,7 @@ const DuplicateConfirmation = ({ candidate, isOpen, onClose, onConfirm, resolvin
               specifiedPayee: specifiedPayee.trim(),
               categoryPreference,
               notesPreference,
+              specifiedNotes: specifiedNotes.trim(),
               recurringPreference,
             })}
             isDisabled={payeePreference === 'specified' && !specifiedPayee.trim()}

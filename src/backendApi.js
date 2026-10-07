@@ -71,6 +71,10 @@ export const resolveDuplicateTransactions = async (candidate, preferences) => (
   })
 ).data;
 
+export const preflightDuplicateTransaction = async transaction => (
+  await api.post('/duplicate-review/preflight', transaction)
+).data;
+
 export const reviewDeletedPendingTransactions = async accountKey => (
   await api.post('/admin-workflow/review-deleted-pending', { accountKey })
 ).data;

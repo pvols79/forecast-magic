@@ -7,11 +7,11 @@ const N8N_NOTE_PATTERN = /created from .* by n8n/i;
 const N8N_EXTERNAL_ID_PATTERN = /^n8n-/i;
 const AUTOMATION_TAG_NAMES = new Set([
   'forecastmagicpending',
-  'lmmanual',
   'n8nproc',
   'n8nprocessed',
   'n8ncreated',
 ]);
+const REVIEW_TAG_NAMES = new Set([...AUTOMATION_TAG_NAMES, 'lmmanual']);
 const STANDARD_MAX_DATE_DIFFERENCE_DAYS = 3;
 const API_SETTLEMENT_MAX_DATE_DIFFERENCE_DAYS = 5;
 
@@ -42,16 +42,23 @@ export const normalizePayee = value => String(value || '')
   .trim();
 
 const normalizeTagName = value => String(value || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+const isAutomationTagName = value => AUTOMATION_TAG_NAMES.has(normalizeTagName(value));
+const isReviewTagName = value => REVIEW_TAG_NAMES.has(normalizeTagName(value));
+const tagNameFor = (tag, tagNamesById = new Map()) => {
+  if (typeof tag === 'string') return tag;
+  if (tag?.name) return tag.name;
+  const id = Number(tag?.id ?? tag);
+  return Number.isFinite(id) ? tagNamesById.get(id) || '' : '';
+};
 
-const isAutomationCreated = transaction => {
+const isAutomationCreated = (transaction, tagNamesById = new Map()) => {
   const notes = String(transaction.notes || '');
   const externalId = transaction.external_id == null ? '' : String(transaction.external_id);
   const tagNames = transaction.tag_names || transaction.tags || [];
   return N8N_NOTE_PATTERN.test(notes)
     || N8N_EXTERNAL_ID_PATTERN.test(externalId)
-    || tagNames.some(tag => AUTOMATION_TAG_NAMES.has(normalizeTagName(
-      typeof tag === 'string' ? tag : tag?.name
-    )));
+    || tagNames.some(tag => isAutomationTagName(tagNameFor(tag, tagNamesById)))
+    || (transaction.tag_ids || []).some(tagId => isAutomationTagName(tagNamesById.get(Number(tagId))));
 };
 
 const bigrams = value => {
@@ -82,16 +89,27 @@ export const payeeSimilarity = (left, right) => {
   return (2 * overlap) / (aBigrams.length + bBigrams.length || 1);
 };
 
-export const normalizeReviewTransaction = (transaction, categoryNames = new Map()) => {
+export const normalizeReviewTransaction = (
+  transaction,
+  categoryNames = new Map(),
+  tagNamesById = new Map()
+) => {
   const source = String(transaction.source || '').toLocaleLowerCase('en-US');
   const accountKey = getTransactionAccountKey(transaction);
   const apiAmount = asNumber(transaction.to_base ?? transaction.amount);
   if (!transaction.id || !accountKey || apiAmount == null || !transaction.date) return null;
-  const automationCreated = isAutomationCreated(transaction);
+  const tagIds = unique((transaction.tag_ids || []).map(Number));
+  const tagNamesByTransactionTagId = Object.fromEntries(tagIds.map(tagId => [tagId, tagNamesById.get(tagId) || '']));
+  const tagNames = unique([
+    ...(transaction.tag_names || []),
+    ...((transaction.tags || []).map(tag => tagNameFor(tag, tagNamesById))),
+    ...tagIds.map(tagId => tagNamesById.get(tagId)),
+  ].filter(Boolean));
+  const automationCreated = isAutomationCreated(transaction, tagNamesById);
   const origin = USER_ENTERED_SOURCES.has(source)
     ? 'manual'
     : source === IMPORTED_SOURCE
-      ? automationCreated ? 'other' : 'imported'
+      ? 'imported'
       : automationCreated ? 'manual' : 'other';
 
   return {
@@ -106,7 +124,10 @@ export const normalizeReviewTransaction = (transaction, categoryNames = new Map(
       ? 'Uncategorized'
       : categoryNames.get(Number(transaction.category_id)) || `Category #${transaction.category_id}`,
     notes: transaction.notes || '',
-    tagIds: unique((transaction.tag_ids || []).map(Number)),
+    externalId: transaction.external_id == null ? null : asId(transaction.external_id),
+    tagIds,
+    tagNames,
+    tagNamesByTransactionTagId,
     recurringId: transaction.recurring_id == null ? null : asId(transaction.recurring_id),
     recurringName: transaction.recurring_id == null ? null : `Recurring #${transaction.recurring_id}`,
     source,
@@ -117,6 +138,7 @@ export const normalizeReviewTransaction = (transaction, categoryNames = new Map(
     origin,
     isPending: Boolean(transaction.is_pending),
     updatedAt: transaction.updated_at || null,
+    automationCreated,
   };
 };
 
@@ -157,13 +179,19 @@ const scorePair = (manual, imported) => {
   // account, amount, payee, and category all strongly identify the same charge.
   const extendedApiSettlementMatch = manual.source === 'api'
     && daysApart <= API_SETTLEMENT_MAX_DATE_DIFFERENCE_DAYS
-    && similarity >= 0.72
-    && sameCategory;
+    && (
+      (similarity >= 0.72 && sameCategory)
+      || (manual.automationCreated && (similarity >= 0.35 || sameCategory || sameRecurring))
+    );
   if (daysApart > STANDARD_MAX_DATE_DIFFERENCE_DAYS && !extendedApiSettlementMatch) return null;
 
   let confidence;
+  const weakEvidenceMatch = !sameCategory
+    && !sameRecurring
+    && similarity < 0.35;
   if (daysApart <= 1 && similarity >= 0.72) confidence = 'high';
   else if (extendedApiSettlementMatch) confidence = 'medium';
+  else if (weakEvidenceMatch) confidence = 'low';
   else if (daysApart <= 2 || similarity >= 0.35 || sameCategory || sameRecurring) confidence = 'medium';
   else confidence = 'low';
 
@@ -175,6 +203,7 @@ const scorePair = (manual, imported) => {
   const reasons = ['Exact amount', sourceReason];
   reasons.push(daysApart === 0 ? 'Same date' : `${daysApart}-day date difference`);
   if (similarity >= 0.55) reasons.push('Similar payee');
+  if (manual.automationCreated) reasons.push('n8n-created placeholder');
   if (sameCategory) reasons.push('Same category');
   if (sameRecurring) reasons.push('Same recurring item');
 
@@ -277,6 +306,7 @@ export const buildMetadataMerge = (manual, imported, options = {}) => {
   let notes;
   if (notesConflict && options.notesPreference === 'manual') notes = manual.notes;
   else if (notesConflict && options.notesPreference === 'imported') notes = imported.notes;
+  else if (options.notesPreference === 'specified') notes = options.specifiedNotes || '';
   else notes = combineNotes(manual.notes, imported.notes);
 
   let recurringId = imported.recurringId;
@@ -289,7 +319,9 @@ export const buildMetadataMerge = (manual, imported, options = {}) => {
     payee = options.specifiedPayee.trim();
   }
 
-  const tagIds = unique([...imported.tagIds, ...manual.tagIds]).sort((a, b) => a - b);
+  const tagIds = imported.tagIds
+    .filter(tagId => !isReviewTagName(imported.tagNamesByTransactionTagId?.[tagId]))
+    .sort((a, b) => a - b);
   return {
     update: {
       payee,
@@ -308,7 +340,7 @@ export const buildMetadataMerge = (manual, imported, options = {}) => {
       payee ? `Use payee: ${payee}` : null,
       categoryId != null ? `Use category: ${categoryId === manual.categoryId ? manual.categoryName : imported.categoryName}` : null,
       notes ? (notesConflict ? 'Merge or preserve both transaction notes' : 'Copy available notes') : null,
-      tagIds.length ? `Keep ${tagIds.length} unique tag${tagIds.length === 1 ? '' : 's'}` : null,
+      tagIds.length ? `Keep ${tagIds.length} imported tag${tagIds.length === 1 ? '' : 's'}` : 'Remove n8n/manual review tags from kept import',
       recurringId ? `Keep recurring relationship #${recurringId}` : null,
       'Keep imported date, amount, account, and bank identity',
       'Permanently delete the manual transaction',

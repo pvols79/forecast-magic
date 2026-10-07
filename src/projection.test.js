@@ -39,7 +39,7 @@ describe('projectCashFlow', () => {
     });
     expect(candidate.manual.id).toBe('1');
     const mergedImport = { ...imported, ...buildMetadataMerge(candidate.manual, candidate.imported).update };
-    expect(mergedImport.tag_ids).toContain(1);
+    expect(mergedImport.tag_ids).not.toContain(1);
     const resolved = project(956.21, [mergedImport, n8n]);
     expect(resolved.openingBalance.adjustmentEvents).toHaveLength(1);
     expect(balanceOn(resolved, '2026-09-15')).toBeCloseTo(856.21);

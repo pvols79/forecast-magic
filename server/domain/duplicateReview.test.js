@@ -3,6 +3,8 @@ import {
   buildMetadataMerge, detectDuplicateCandidates, normalizeReviewTransaction,
 } from './duplicateReview';
 
+const tagNames = new Map([[1, 'LM Manual'], [2, 'Forecast Magic Pending'], [3, 'Household']]);
+
 const transaction = overrides => normalizeReviewTransaction({
   id: overrides.id || Math.random().toString(),
   plaid_account_id: 1,
@@ -14,7 +16,7 @@ const transaction = overrides => normalizeReviewTransaction({
   notes: '',
   tag_ids: [],
   ...overrides,
-}, new Map([[10, 'Entertainment'], [11, 'Subscriptions']]));
+}, new Map([[10, 'Entertainment'], [11, 'Subscriptions']]), tagNames);
 
 const scan = (transactions, options = {}) => detectDuplicateCandidates({ transactions, ...options });
 
@@ -127,12 +129,16 @@ describe('duplicate transaction detection', () => {
     });
   });
 
-  it('classifies an exact-amount nearby-date pair with weak payee similarity as medium', () => {
+  it('hides an ordinary manual exact-amount nearby-date pair when payee and category evidence is weak', () => {
     const candidates = scan([
       transaction({ id: 1, source: 'manual', payee: 'Family music plan', category_id: null }),
       transaction({ id: 2, source: 'plaid', payee: 'PAYMENT PROCESSOR 8842', date: '2026-08-16', category_id: null }),
     ]);
-    expect(candidates[0].confidence).toBe('medium');
+    expect(candidates).toEqual([]);
+    expect(scan([
+      transaction({ id: 1, source: 'manual', payee: 'Family music plan', category_id: null }),
+      transaction({ id: 2, source: 'plaid', payee: 'PAYMENT PROCESSOR 8842', date: '2026-08-16', category_id: null }),
+    ], { includeLow: true })[0].confidence).toBe('low');
   });
 
   it('detects a plausible three-day weak match as low but hides it by default', () => {
@@ -162,24 +168,24 @@ describe('duplicate transaction detection', () => {
     ])).toEqual([]);
   });
 
-  it('excludes a plaid-source row with n8n notes from duplicate suggestions', () => {
-    const alreadyResolvedImport = transaction({
+  it('keeps plaid-source rows importable even when they inherited n8n notes', () => {
+    const inheritedImport = transaction({
       id: 1,
       source: 'plaid',
       notes: 'Created from Capital One Gmail alert by n8n.',
     });
-    expect(alreadyResolvedImport).toMatchObject({ origin: 'other' });
+    expect(inheritedImport).toMatchObject({ origin: 'imported', automationCreated: true });
     expect(scan([
       transaction({ id: 2, source: 'api' }),
-      alreadyResolvedImport,
-    ], { includeLow: true })).toEqual([]);
+      inheritedImport,
+    ], { includeLow: true })).toHaveLength(1);
     expect(scan([
-      alreadyResolvedImport,
+      inheritedImport,
       transaction({ id: 3, source: 'plaid', notes: '' }),
     ], { includeLow: true })).toEqual([]);
   });
 
-  it('excludes plaid-source rows marked by non-CapOne n8n workflows', () => {
+  it('keeps plaid-source rows importable when marked by non-CapOne n8n workflows', () => {
     const byNote = transaction({
       id: 1,
       source: 'plaid',
@@ -191,13 +197,39 @@ describe('duplicate transaction detection', () => {
       external_id: 'n8n-venmo-gmail-message-id',
     });
 
-    expect(byNote).toMatchObject({ origin: 'other' });
-    expect(byExternalId).toMatchObject({ origin: 'other' });
+    expect(byNote).toMatchObject({ origin: 'imported' });
+    expect(byExternalId).toMatchObject({ origin: 'imported' });
     expect(scan([
       transaction({ id: 3, source: 'api' }),
       byNote,
       byExternalId,
-    ], { includeLow: true })).toEqual([]);
+    ], { includeLow: true })).toHaveLength(1);
+  });
+
+  it('allows n8n API placeholders to match imported rows with weak payee text inside five days', () => {
+    const candidates = scan([
+      transaction({
+        id: 1,
+        source: 'api',
+        date: '2026-10-03',
+        payee: 'VENMO',
+        amount: '75.00',
+        notes: 'Created from Venmo payment email by n8n.',
+      }),
+      transaction({
+        id: 2,
+        source: 'plaid',
+        date: '2026-10-05',
+        payee: 'Esteban Hernandez',
+        amount: '75.00',
+      }),
+    ]);
+
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0]).toMatchObject({
+      confidence: 'medium',
+      reasons: expect.arrayContaining(['n8n-created placeholder']),
+    });
   });
 
   it('suppresses only the exact ignored pair', () => {
@@ -256,7 +288,7 @@ describe('duplicate metadata merge', () => {
       payee: 'Spotify Family',
       category_id: 10,
       notes: 'Imported note\n\nManual note: Family plan',
-      tag_ids: [1, 2, 3],
+      tag_ids: [3],
       recurring_id: '8',
     });
     expect(merge.update).not.toHaveProperty('id');
@@ -287,5 +319,17 @@ describe('duplicate metadata merge', () => {
 
     expect(merge.update.payee).toBe('Clean Merchant');
     expect(merge.summary).toContain('Use payee: Clean Merchant');
+  });
+
+  it('can use specified notes when resolving a duplicate', () => {
+    const manual = transaction({ id: 1, source: 'api', notes: 'Email text' });
+    const imported = transaction({ id: 2, source: 'plaid', notes: 'Bank text' });
+
+    const merge = buildMetadataMerge(manual, imported, {
+      notesPreference: 'specified',
+      specifiedNotes: 'Clean notes',
+    });
+
+    expect(merge.update.notes).toBe('Clean notes');
   });
 });

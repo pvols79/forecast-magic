@@ -19,6 +19,18 @@ const specifiedPayee = value => {
   if (payee.length > 200) throw conflictError('Specified payee must be 200 characters or less.');
   return payee;
 };
+const specifiedNotes = value => {
+  const notes = typeof value === 'string' ? value.trim() : '';
+  if (notes.length > 2000) throw conflictError('Specified notes must be 2000 characters or less.');
+  return notes;
+};
+const dateDistanceDays = (left, right) => {
+  const a = new Date(`${left}T00:00:00Z`);
+  const b = new Date(`${right}T00:00:00Z`);
+  if (Number.isNaN(a.getTime()) || Number.isNaN(b.getTime())) return Number.POSITIVE_INFINITY;
+  return Math.round(Math.abs(a.getTime() - b.getTime()) / 86400000);
+};
+const amountCents = value => Math.round(Number(value) * 100);
 
 export class DuplicateReviewService {
   constructor(
@@ -38,13 +50,15 @@ export class DuplicateReviewService {
   async scan(accountKey, { includeLow = false, anchorDate = this.today() } = {}) {
     if (!accountKey) throw new Error('An account is required for Duplicate Review.');
     const startDate = addDays(anchorDate, -29);
-    const [rawTransactions, categories] = await Promise.all([
-      this.lunchMoney.getRawTransactions(startDate, anchorDate),
+    const [rawTransactions, categories, tags] = await Promise.all([
+      this.lunchMoney.getRawTransactions(startDate, anchorDate, { includeMetadata: true }),
       this.lunchMoney.getCategories(),
+      this.lunchMoney.getTags(),
     ]);
     const categoryNames = new Map(categories.map(category => [Number(category.id), category.name]));
+    const tagNamesById = new Map(tags.map(tag => [Number(tag.id), tag.name]));
     const transactions = rawTransactions
-      .map(transaction => normalizeReviewTransaction(transaction, categoryNames))
+      .map(transaction => normalizeReviewTransaction(transaction, categoryNames, tagNamesById))
       .filter(transaction => transaction?.accountKey === accountKey);
     const ignoredPairIds = this.repository.listIgnoredPairIds(accountKey);
     const candidates = detectDuplicateCandidates({ transactions, ignoredPairIds, includeLow })
@@ -100,16 +114,18 @@ export class DuplicateReviewService {
       throw new Error('Account and both transaction IDs are required.');
     }
 
-    const [manualRaw, importedRaw, categories] = await Promise.all([
+    const [manualRaw, importedRaw, categories, tags] = await Promise.all([
       this.lunchMoney.getTransaction(manualTransactionId),
       this.lunchMoney.getTransaction(importedTransactionId),
       this.lunchMoney.getCategories(),
+      this.lunchMoney.getTags(),
     ]);
     if (!manualRaw || !importedRaw) throw conflictError('One of the transactions no longer exists. Run the scan again.');
 
     const categoryNames = new Map(categories.map(category => [Number(category.id), category.name]));
-    const manual = normalizeReviewTransaction(manualRaw, categoryNames);
-    const imported = normalizeReviewTransaction(importedRaw, categoryNames);
+    const tagNamesById = new Map(tags.map(tag => [Number(tag.id), tag.name]));
+    const manual = normalizeReviewTransaction(manualRaw, categoryNames, tagNamesById);
+    const imported = normalizeReviewTransaction(importedRaw, categoryNames, tagNamesById);
     if (!manual || !imported || manual.accountKey !== accountKey || imported.accountKey !== accountKey) {
       throw conflictError('A transaction account changed. Run the scan again.');
     }
@@ -123,13 +139,14 @@ export class DuplicateReviewService {
       payeePreference: allowedPreference(input.payeePreference, ['manual', 'imported', 'specified'], 'manual'),
       specifiedPayee: specifiedPayee(input.specifiedPayee),
       categoryPreference: allowedPreference(input.categoryPreference, ['manual', 'imported'], 'manual'),
-      notesPreference: allowedPreference(input.notesPreference, ['combine', 'manual', 'imported'], 'combine'),
+      notesPreference: allowedPreference(input.notesPreference, ['combine', 'manual', 'imported', 'specified'], 'combine'),
+      specifiedNotes: specifiedNotes(input.specifiedNotes),
       recurringPreference: allowedPreference(input.recurringPreference, ['manual', 'imported'], 'imported'),
     });
 
     await this.lunchMoney.updateTransaction(imported.id, merge.update);
     const updatedRaw = await this.lunchMoney.getTransaction(imported.id);
-    const updated = normalizeReviewTransaction(updatedRaw, categoryNames);
+    const updated = normalizeReviewTransaction(updatedRaw, categoryNames, tagNamesById);
     if (!updated || updated.id !== imported.id || updated.origin !== 'imported') {
       throw conflictError('Lunch Money did not confirm the imported transaction update. The manual transaction was not deleted.');
     }
@@ -139,6 +156,71 @@ export class DuplicateReviewService {
       keptTransactionId: imported.id,
       deletedTransactionId: manual.id,
       mergedMetadata: merge.update,
+    };
+  }
+
+  async preflight(input = {}) {
+    const { accountKey, date, amount, payee = '', externalId = '', notes = '' } = input;
+    if (!accountKey || !date || amount == null) {
+      throw new Error('Account, date, and amount are required for duplicate preflight.');
+    }
+    const amountInCents = amountCents(amount);
+    if (!Number.isFinite(amountInCents)) throw new Error('Amount must be numeric.');
+    const startDate = addDays(date, -5);
+    const endDate = addDays(date, 5);
+    const [rawTransactions, categories, tags] = await Promise.all([
+      this.lunchMoney.getRawTransactions(startDate, endDate, { includeMetadata: true }),
+      this.lunchMoney.getCategories(),
+      this.lunchMoney.getTags(),
+    ]);
+    const categoryNames = new Map(categories.map(category => [Number(category.id), category.name]));
+    const tagNamesById = new Map(tags.map(tag => [Number(tag.id), tag.name]));
+    const probe = normalizeReviewTransaction({
+      id: 'preflight',
+      date,
+      amount: String(Math.abs(amountInCents) / 100),
+      to_base: String(Math.abs(amountInCents) / 100),
+      payee,
+      notes,
+      external_id: externalId || 'n8n-preflight',
+      source: 'api',
+      ...(accountKey.startsWith('plaid:')
+        ? { plaid_account_id: accountKey.split(':')[1] }
+        : { manual_account_id: accountKey.split(':')[1] }),
+    }, categoryNames, tagNamesById);
+    const transactions = rawTransactions
+      .map(transaction => normalizeReviewTransaction(transaction, categoryNames, tagNamesById))
+      .filter(transaction => transaction?.accountKey === accountKey);
+    const existingExternalId = externalId
+      ? transactions.find(transaction => transaction.id !== 'preflight'
+        && transaction.source === 'api'
+        && String(transaction.externalId || '') === String(externalId))
+      : null;
+    const amountMatches = transactions
+      .filter(transaction => transaction.apiAmount === probe.apiAmount && dateDistanceDays(transaction.date, date) <= 5)
+      .map(transaction => ({
+        transactionId: transaction.id,
+        date: transaction.date,
+        payee: transaction.payee,
+        amount: transaction.amount,
+        source: transaction.source,
+        origin: transaction.origin,
+        daysApart: dateDistanceDays(transaction.date, date),
+        notes: transaction.notes,
+        tagNames: transaction.tagNames,
+      }))
+      .sort((left, right) => left.daysApart - right.daysApart || String(left.transactionId).localeCompare(String(right.transactionId)));
+    return {
+      shouldCreate: !existingExternalId && amountMatches.length === 0,
+      duplicateRisk: Boolean(existingExternalId || amountMatches.length > 0),
+      exactExternalIdMatch: existingExternalId ? {
+        transactionId: existingExternalId.id,
+        date: existingExternalId.date,
+        payee: existingExternalId.payee,
+        source: existingExternalId.source,
+      } : null,
+      amountDateMatches: amountMatches,
+      window: { startDate, endDate },
     };
   }
 }

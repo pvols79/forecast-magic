@@ -1,9 +1,14 @@
 import { Router } from 'express';
-import { requireAdmin } from '../auth.js';
+import { requireAdmin, requireAuditRead } from '../auth.js';
 import { DuplicateReviewService } from '../services/duplicateReviewService.js';
 
 export const createDuplicateReviewRouter = (service = new DuplicateReviewService()) => {
   const router = Router();
+
+  router.post('/preflight', requireAuditRead, async (request, response) => {
+    response.json(await service.preflight(request.body || {}));
+  });
+
   router.use(requireAdmin);
 
   router.get('/scan', async (request, response) => {

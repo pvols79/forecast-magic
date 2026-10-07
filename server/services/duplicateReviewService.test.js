@@ -33,6 +33,9 @@ const setup = ({ updateError, updateReturn, deleteError, manualSource = 'manual'
     getCategories: vi.fn(async () => [
       { id: 10, name: 'Entertainment' }, { id: 11, name: 'Subscriptions' },
     ]),
+    getTags: vi.fn(async () => [
+      { id: 1, name: 'LM Manual' }, { id: 2, name: 'Forecast Magic Pending' }, { id: 3, name: 'Household' },
+    ]),
     getTransaction: vi.fn(async id => String(id) === '1' ? manual : imported),
     updateTransaction: vi.fn(async (id, update) => {
       calls.push(['update', String(id), update]);
@@ -77,7 +80,7 @@ describe('DuplicateReviewService', () => {
     expect(calls.map(call => call.slice(0, 2))).toEqual([['update', '2'], ['delete', '1']]);
     expect(calls[0][2]).toMatchObject({
       payee: 'Spotify Family', category_id: 10,
-      notes: 'Imported note\n\nManual note: Manual note', tag_ids: [1, 2],
+      notes: 'Imported note\n\nManual note: Manual note', tag_ids: [],
     });
     expect(calls[0][2]).not.toHaveProperty('date');
     expect(calls[0][2]).not.toHaveProperty('amount');
@@ -173,5 +176,32 @@ describe('DuplicateReviewService', () => {
       ...fingerprints({ ...manual, payee: 'Old name' }, imported),
     })).rejects.toMatchObject({ status: 409 });
     expect(calls).toEqual([]);
+  });
+
+  it('supports specified notes during resolution', async () => {
+    const { service, manual, imported, calls } = setup();
+    await service.resolve({
+      accountKey: 'plaid:1', manualTransactionId: '1', importedTransactionId: '2',
+      ...fingerprints(manual, imported),
+      notesPreference: 'specified',
+      specifiedNotes: 'Clean memo',
+    });
+    expect(calls[0][2]).toMatchObject({ notes: 'Clean memo' });
+  });
+
+  it('preflights n8n-created transactions against nearby existing rows', async () => {
+    const { service } = setup();
+    const result = await service.preflight({
+      accountKey: 'plaid:1',
+      date: '2026-08-14',
+      amount: 20.79,
+      payee: 'Spotify Family',
+      externalId: 'n8n-test',
+    });
+    expect(result).toMatchObject({
+      shouldCreate: false,
+      duplicateRisk: true,
+    });
+    expect(result.amountDateMatches).toHaveLength(2);
   });
 });
