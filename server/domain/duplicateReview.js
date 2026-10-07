@@ -190,13 +190,14 @@ const scorePair = (manual, imported) => {
     );
   if (daysApart > STANDARD_MAX_DATE_DIFFERENCE_DAYS && !extendedApiSettlementMatch) return null;
 
-  let confidence;
   const weakEvidenceMatch = !sameCategory
     && !sameRecurring
     && similarity < 0.35;
+  if (weakEvidenceMatch) return null;
+
+  let confidence;
   if (daysApart <= 1 && similarity >= 0.72) confidence = 'high';
   else if (extendedApiSettlementMatch) confidence = 'medium';
-  else if (weakEvidenceMatch) confidence = 'low';
   else if (daysApart <= 2 || similarity >= 0.35 || sameCategory || sameRecurring) confidence = 'medium';
   else confidence = 'low';
 

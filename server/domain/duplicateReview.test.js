@@ -129,25 +129,22 @@ describe('duplicate transaction detection', () => {
     });
   });
 
-  it('hides an ordinary manual exact-amount nearby-date pair when payee and category evidence is weak', () => {
-    const candidates = scan([
+  it('rejects exact-amount nearby-date pairs when payee and category evidence is weak', () => {
+    const transactions = [
       transaction({ id: 1, source: 'manual', payee: 'Family music plan', category_id: null }),
       transaction({ id: 2, source: 'plaid', payee: 'PAYMENT PROCESSOR 8842', date: '2026-08-16', category_id: null }),
-    ]);
-    expect(candidates).toEqual([]);
-    expect(scan([
-      transaction({ id: 1, source: 'manual', payee: 'Family music plan', category_id: null }),
-      transaction({ id: 2, source: 'plaid', payee: 'PAYMENT PROCESSOR 8842', date: '2026-08-16', category_id: null }),
-    ], { includeLow: true })[0].confidence).toBe('low');
+    ];
+    expect(scan(transactions)).toEqual([]);
+    expect(scan(transactions, { includeLow: true })).toEqual([]);
   });
 
-  it('detects a plausible three-day weak match as low but hides it by default', () => {
+  it('rejects plausible three-day weak matches even when low confidence is shown', () => {
     const transactions = [
       transaction({ id: 1, source: 'manual', payee: 'Family music plan', category_id: null }),
       transaction({ id: 2, source: 'plaid', payee: 'PAYMENT PROCESSOR 8842', date: '2026-08-17', category_id: null }),
     ];
     expect(scan(transactions)).toEqual([]);
-    expect(scan(transactions, { includeLow: true })[0].confidence).toBe('low');
+    expect(scan(transactions, { includeLow: true })).toEqual([]);
   });
 
   it('never matches different accounts, amounts, or dates outside three days', () => {
