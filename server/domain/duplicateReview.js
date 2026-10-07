@@ -164,6 +164,11 @@ const dateDifference = (left, right) => {
 };
 
 const candidateId = (manual, imported) => `${manual.id}:${imported.id}`;
+const importedMerchantKey = candidate => [
+  candidate.imported.accountKey,
+  candidate.imported.apiAmount.toFixed(4),
+  normalizePayee(candidate.imported.payee),
+].join('|');
 
 const scorePair = (manual, imported) => {
   if (manual.origin !== 'manual' || imported.origin !== 'imported') return null;
@@ -268,11 +273,15 @@ export const detectDuplicateCandidates = ({ transactions, ignoredPairIds = new S
   const selected = [];
   const selectedManualIds = new Set();
   const selectedImportedIds = new Set();
+  const selectedImportedMerchantKeys = new Set();
   for (const candidate of candidates.sort(compareCandidates)) {
     if (selectedManualIds.has(candidate.manual.id) || selectedImportedIds.has(candidate.imported.id)) continue;
+    const merchantKey = importedMerchantKey(candidate);
+    if (candidate.confidence === 'low' && selectedImportedMerchantKeys.has(merchantKey)) continue;
     selected.push(candidate);
     selectedManualIds.add(candidate.manual.id);
     selectedImportedIds.add(candidate.imported.id);
+    selectedImportedMerchantKeys.add(merchantKey);
   }
   return selected.sort((left, right) => (
     confidenceRank[left.confidence] - confidenceRank[right.confidence]

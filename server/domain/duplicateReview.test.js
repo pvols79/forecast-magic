@@ -269,6 +269,48 @@ describe('duplicate transaction detection', () => {
 
     expect(candidates.map(candidate => candidate.id)).toEqual(['manual-29:imported-01']);
   });
+
+  it('suppresses low-confidence shadows for the same imported merchant and amount', () => {
+    const candidates = scan([
+      transaction({
+        id: 'api-current',
+        source: 'api',
+        date: '2026-10-03',
+        payee: 'Esteban Hernandez',
+        amount: '75.00',
+        category_id: 10,
+        notes: 'Created from Venmo payment email by n8n.',
+      }),
+      transaction({
+        id: 'manual-old',
+        source: 'manual',
+        date: '2026-09-21',
+        payee: 'Britainy Harris',
+        amount: '75.00',
+        category_id: null,
+      }),
+      transaction({
+        id: 'imported-current',
+        source: 'plaid',
+        date: '2026-10-05',
+        payee: 'Esteban Hernandez',
+        amount: '75.00',
+        category_id: 10,
+      }),
+      transaction({
+        id: 'imported-old',
+        source: 'plaid',
+        date: '2026-09-21',
+        payee: 'Esteban Hernandez',
+        amount: '75.00',
+        category_id: 10,
+      }),
+    ], { includeLow: true });
+
+    expect(candidates.map(candidate => candidate.id)).toEqual([
+      'api-current:imported-current',
+    ]);
+  });
 });
 
 describe('duplicate metadata merge', () => {
