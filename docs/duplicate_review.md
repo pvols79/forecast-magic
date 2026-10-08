@@ -1,6 +1,6 @@
 # Duplicate Review
 
-Duplicate Review is an Admin-only maintenance workflow for likely pairs where a manually created Lunch Money transaction is later imported from a financial institution.
+Duplicate Review is an Admin-only maintenance workflow for likely pairs where a pending placeholder transaction is later imported from a financial institution.
 
 ## Architecture
 
@@ -28,19 +28,19 @@ Update imported metadata
 Delete manual transaction
 ```
 
-Candidates must belong to the same compound account, have an exact signed Lunch Money API amount, contain one `manual` and one `plaid` source transaction, and occur no more than three days apart. Payee similarity, category, and recurring relationships determine confidence. Low-confidence candidates are hidden unless the Admin requests them.
+Candidates must belong to the same compound account, have an exact signed Lunch Money API amount, contain one placeholder and one eligible Plaid import, and occur no more than five days apart. Placeholders are n8n/API rows tagged `n8n_proc` or manually created rows tagged `LM Manual`. Plaid imports already tagged `matched_import` are excluded. Payee similarity, category, recurring relationship, and date distance determine whether the candidate is labeled High, Medium, or Low; all confidence levels are shown.
 
-Selecting **Not Duplicate** stores only the exact manual/imported transaction ID pair, account key, and ignored timestamp in SQLite. Lunch Money transaction history is not copied into the local database.
+Selecting **Not Duplicate** stores only the exact placeholder/imported transaction ID pair, account key, and ignored timestamp in SQLite. Lunch Money transaction history is not copied into the local database.
 
-Selecting **Duplicate** keeps the imported transaction as the bank event. The service re-fetches and revalidates both transactions, updates the imported payee and selected metadata, confirms that update, and only then deletes the manual transaction. An update failure prevents deletion. A deletion failure remains visible as an error and the candidate can be scanned again.
+Selecting **Duplicate** keeps the imported transaction as the bank event. The service re-fetches and revalidates both transactions, updates the imported payee and selected metadata, removes pending-placeholder pipeline tags, adds `matched_import`, confirms that update, and only then deletes the placeholder transaction. An update failure prevents deletion. A deletion failure remains visible as an error and the candidate can be scanned again.
 
-For transactions created early by n8n or another API integration, that deletion also retires the placeholder from cash-flow opening adjustments. Until resolution, the user/API-created transaction continues to affect available cash and an imported match remains visible as a duplicate rather than being silently removed by projection logic.
+For transactions created early by n8n or another API integration, that deletion also retires the placeholder from cash-flow opening adjustments. The retained `matched_import` transaction remains normal cleared spending and is not treated as pending.
 
 ## APIs
 
 The Admin session protects all review operations:
 
-- `GET /api/duplicate-review/scan?accountKey=plaid:123&includeLow=false`
+- `GET /api/duplicate-review/scan?accountKey=plaid:123`
 - `POST /api/duplicate-review/ignore`
 - `POST /api/duplicate-review/resolve`
 

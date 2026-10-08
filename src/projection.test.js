@@ -11,7 +11,7 @@ const balanceOn = (projection, date) => projection.dailyBalances.find(day => day
 describe('projectCashFlow', () => {
   it('deducts an LM Manual mortgage and an n8n placeholder, then stops the extra deduction after resolving an import', () => {
     const service = new LunchMoneyService();
-    const tags = new Map([[1, 'LM Manual'], [2, 'Forecast Magic Pending']]);
+    const tags = new Map([[1, 'LM Manual'], [2, 'n8n_proc'], [3, 'matched_import']]);
     const mortgage = {
       id: 1, plaid_account_id: 1, date: '2026-09-14', payee: 'Rocket Mortgage',
       amount: '2043.79', source: 'manual', tag_ids: [1], recurring_id: 20, is_pending: false,
@@ -35,11 +35,12 @@ describe('projectCashFlow', () => {
 
     const imported = { ...mortgage, id: 3, date: '2026-09-15', source: 'plaid', tag_ids: [] };
     const [candidate] = detectDuplicateCandidates({
-      transactions: [mortgage, imported].map(t => normalizeReviewTransaction(t)),
+      transactions: [mortgage, imported].map(t => normalizeReviewTransaction(t, new Map(), tags)),
     });
     expect(candidate.manual.id).toBe('1');
-    const mergedImport = { ...imported, ...buildMetadataMerge(candidate.manual, candidate.imported).update };
+    const mergedImport = { ...imported, ...buildMetadataMerge(candidate.manual, candidate.imported, { matchedImportTagId: 3 }).update };
     expect(mergedImport.tag_ids).not.toContain(1);
+    expect(mergedImport.tag_ids).toContain(3);
     const resolved = project(956.21, [mergedImport, n8n]);
     expect(resolved.openingBalance.adjustmentEvents).toHaveLength(1);
     expect(balanceOn(resolved, '2026-09-15')).toBeCloseTo(856.21);

@@ -54,7 +54,7 @@ const rawTransactions = [{
   payee: 'Untagged alert',
   notes: 'Created from Capital One Gmail alert by n8n.',
   external_id: 'n8n-capone-gmail-untagged',
-  tag_ids: [1],
+  tag_ids: [],
 }];
 
 const lunchMoney = {

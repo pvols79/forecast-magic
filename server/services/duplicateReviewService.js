@@ -1,11 +1,13 @@
 import { addDays, getDateInTimezone } from '../domain/periods.js';
 import {
   buildMetadataMerge, detectDuplicateCandidates, normalizeReviewTransaction,
-  transactionFingerprint, validateResolvablePair,
+  payeeSimilarity, transactionFingerprint, validateResolvablePair,
 } from '../domain/duplicateReview.js';
 import { DuplicateReviewRepository } from '../repositories/duplicateReviewRepository.js';
 import { SettingsRepository } from '../repositories/settingsRepository.js';
 import { LunchMoneyService } from './lunchMoneyService.js';
+
+const MATCHED_IMPORT_TAG_NAME = 'matched_import';
 
 const conflictError = message => {
   const error = new Error(message);
@@ -31,6 +33,10 @@ const dateDistanceDays = (left, right) => {
   return Math.round(Math.abs(a.getTime() - b.getTime()) / 86400000);
 };
 const amountCents = value => Math.round(Number(value) * 100);
+const normalizeTagName = value => String(value || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+const sleep = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
+
+const findTagByName = (tags, name) => tags.find(tag => normalizeTagName(tag.name) === normalizeTagName(name));
 
 export class DuplicateReviewService {
   constructor(
@@ -47,7 +53,7 @@ export class DuplicateReviewService {
     return getDateInTimezone(new Date(), this.settings.get('timezone') || 'UTC');
   }
 
-  async scan(accountKey, { includeLow = false, anchorDate = this.today() } = {}) {
+  async scan(accountKey, { anchorDate = this.today() } = {}) {
     if (!accountKey) throw new Error('An account is required for Duplicate Review.');
     const startDate = addDays(anchorDate, -29);
     const [rawTransactions, categories, tags] = await Promise.all([
@@ -61,9 +67,9 @@ export class DuplicateReviewService {
       .map(transaction => normalizeReviewTransaction(transaction, categoryNames, tagNamesById))
       .filter(transaction => transaction?.accountKey === accountKey);
     const ignoredPairIds = this.repository.listIgnoredPairIds(accountKey);
-    const candidates = detectDuplicateCandidates({ transactions, ignoredPairIds, includeLow })
+    const candidates = detectDuplicateCandidates({ transactions, ignoredPairIds })
       .map(candidate => ({ ...candidate, mergePreview: buildMetadataMerge(candidate.manual, candidate.imported) }));
-    return { accountKey, startDate, endDate: anchorDate, includeLow, candidates };
+    return { accountKey, startDate, endDate: anchorDate, includeLow: true, candidates };
   }
 
   async getReportingSummary(accountKey, anchorDate = this.today()) {
@@ -108,6 +114,17 @@ export class DuplicateReviewService {
     return this.repository.ignore({ accountKey, manualTransactionId, importedTransactionId });
   }
 
+  async ensureTag(tags, name) {
+    const existing = findTagByName(tags, name);
+    if (existing) return existing;
+    if (typeof this.lunchMoney.createTag !== 'function') {
+      throw conflictError(`Lunch Money tag "${name}" does not exist and cannot be created by this service.`);
+    }
+    const created = await this.lunchMoney.createTag({ name });
+    tags.push(created);
+    return created;
+  }
+
   async resolve(input) {
     const { accountKey, manualTransactionId, importedTransactionId } = input;
     if (!accountKey || !manualTransactionId || !importedTransactionId) {
@@ -122,6 +139,7 @@ export class DuplicateReviewService {
     ]);
     if (!manualRaw || !importedRaw) throw conflictError('One of the transactions no longer exists. Run the scan again.');
 
+    const matchedImportTag = await this.ensureTag(tags, MATCHED_IMPORT_TAG_NAME);
     const categoryNames = new Map(categories.map(category => [Number(category.id), category.name]));
     const tagNamesById = new Map(tags.map(tag => [Number(tag.id), tag.name]));
     const manual = normalizeReviewTransaction(manualRaw, categoryNames, tagNamesById);
@@ -142,13 +160,19 @@ export class DuplicateReviewService {
       notesPreference: allowedPreference(input.notesPreference, ['combine', 'manual', 'imported', 'specified'], 'combine'),
       specifiedNotes: specifiedNotes(input.specifiedNotes),
       recurringPreference: allowedPreference(input.recurringPreference, ['manual', 'imported'], 'imported'),
+      matchedImportTagId: matchedImportTag.id,
     });
 
     await this.lunchMoney.updateTransaction(imported.id, merge.update);
-    const updatedRaw = await this.lunchMoney.getTransaction(imported.id);
-    const updated = normalizeReviewTransaction(updatedRaw, categoryNames, tagNamesById);
-    if (!updated || updated.id !== imported.id || updated.origin !== 'imported') {
-      throw conflictError('Lunch Money did not confirm the imported transaction update. The manual transaction was not deleted.');
+    let updated = null;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      if (attempt > 0) await sleep(500);
+      const updatedRaw = await this.lunchMoney.getTransaction(imported.id);
+      updated = normalizeReviewTransaction(updatedRaw, categoryNames, tagNamesById);
+      if (updated?.id === imported.id && updated.role === 'matchedImport') break;
+    }
+    if (!updated || updated.id !== imported.id || updated.role !== 'matchedImport') {
+      throw conflictError('Lunch Money did not confirm the imported transaction update with matched_import. The placeholder was not deleted.');
     }
 
     await this.lunchMoney.deleteTransaction(manual.id);
@@ -178,8 +202,8 @@ export class DuplicateReviewService {
     const probe = normalizeReviewTransaction({
       id: 'preflight',
       date,
-      amount: String(Math.abs(amountInCents) / 100),
-      to_base: String(Math.abs(amountInCents) / 100),
+      amount: String(amountInCents / 100),
+      to_base: String(amountInCents / 100),
       payee,
       notes,
       external_id: externalId || 'n8n-preflight',
@@ -193,7 +217,6 @@ export class DuplicateReviewService {
       .filter(transaction => transaction?.accountKey === accountKey);
     const existingExternalId = externalId
       ? transactions.find(transaction => transaction.id !== 'preflight'
-        && transaction.source === 'api'
         && String(transaction.externalId || '') === String(externalId))
       : null;
     const amountMatches = transactions
@@ -205,14 +228,28 @@ export class DuplicateReviewService {
         amount: transaction.amount,
         source: transaction.source,
         origin: transaction.origin,
+        role: transaction.role,
         daysApart: dateDistanceDays(transaction.date, date),
+        payeeSimilarity: Number(payeeSimilarity(payee, transaction.payee).toFixed(2)),
+        reason: transaction.role === 'imported' || transaction.role === 'matchedImport'
+          ? 'existing_import'
+          : transaction.role === 'placeholder' && transaction.source === 'manual'
+            ? 'existing_manual_placeholder'
+            : transaction.role === 'placeholder'
+              ? 'existing_placeholder'
+              : 'existing_amount_date_match',
         notes: transaction.notes,
         tagNames: transaction.tagNames,
       }))
-      .sort((left, right) => left.daysApart - right.daysApart || String(left.transactionId).localeCompare(String(right.transactionId)));
+      .sort((left, right) => (
+        left.daysApart - right.daysApart
+        || right.payeeSimilarity - left.payeeSimilarity
+        || String(left.transactionId).localeCompare(String(right.transactionId))
+      ));
     return {
       shouldCreate: !existingExternalId && amountMatches.length === 0,
       duplicateRisk: Boolean(existingExternalId || amountMatches.length > 0),
+      reason: existingExternalId ? 'exact_external_id' : amountMatches[0]?.reason || null,
       exactExternalIdMatch: existingExternalId ? {
         transactionId: existingExternalId.id,
         date: existingExternalId.date,

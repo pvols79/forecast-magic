@@ -1,19 +1,34 @@
 import crypto from 'node:crypto';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-const USER_ENTERED_SOURCES = new Set(['manual', 'api', 'recurring']);
 const IMPORTED_SOURCE = 'plaid';
 const N8N_NOTE_PATTERN = /created from .* by n8n/i;
 const N8N_EXTERNAL_ID_PATTERN = /^n8n-/i;
-const AUTOMATION_TAG_NAMES = new Set([
-  'forecastmagicpending',
+const N8N_PLACEHOLDER_TAG_NAMES = new Set([
   'n8nproc',
+  'n8npending',
+]);
+const MANUAL_PLACEHOLDER_TAG_NAMES = new Set([
+  'lmmanual',
+]);
+const LEGACY_PLACEHOLDER_TAG_NAMES = new Set([
+  'forecastmagicpending',
+]);
+const AUTOMATION_TAG_NAMES = new Set([
+  ...N8N_PLACEHOLDER_TAG_NAMES,
   'n8nprocessed',
   'n8ncreated',
 ]);
-const REVIEW_TAG_NAMES = new Set([...AUTOMATION_TAG_NAMES, 'lmmanual']);
-const STANDARD_MAX_DATE_DIFFERENCE_DAYS = 3;
-const API_SETTLEMENT_MAX_DATE_DIFFERENCE_DAYS = 5;
+const PIPELINE_TAG_NAMES = new Set([
+  ...N8N_PLACEHOLDER_TAG_NAMES,
+  ...MANUAL_PLACEHOLDER_TAG_NAMES,
+  ...LEGACY_PLACEHOLDER_TAG_NAMES,
+  'n8nprocessed',
+  'n8ncreated',
+]);
+const MATCHED_IMPORT_TAG_NAME = 'matchedimport';
+const MEDIUM_MAX_DATE_DIFFERENCE_DAYS = 3;
+const LOW_MAX_DATE_DIFFERENCE_DAYS = 5;
 
 const asId = value => value == null ? null : String(value);
 const asNumber = value => {
@@ -43,13 +58,19 @@ export const normalizePayee = value => String(value || '')
 
 const normalizeTagName = value => String(value || '').toLowerCase().replace(/[^a-z0-9]/g, '');
 const isAutomationTagName = value => AUTOMATION_TAG_NAMES.has(normalizeTagName(value));
-const isReviewTagName = value => REVIEW_TAG_NAMES.has(normalizeTagName(value));
+const isPipelineTagName = value => PIPELINE_TAG_NAMES.has(normalizeTagName(value));
+const isMatchedImportTagName = value => normalizeTagName(value) === MATCHED_IMPORT_TAG_NAME;
 const tagNameFor = (tag, tagNamesById = new Map()) => {
   if (typeof tag === 'string') return tag;
   if (tag?.name) return tag.name;
   const id = Number(tag?.id ?? tag);
   return Number.isFinite(id) ? tagNamesById.get(id) || '' : '';
 };
+
+const hasNamedTag = (transaction, predicate) => (
+  (transaction.tagNames || []).some(predicate)
+  || (transaction.tagIds || []).some(tagId => predicate(transaction.tagNamesByTransactionTagId?.[tagId]))
+);
 
 const isAutomationCreated = (transaction, tagNamesById = new Map()) => {
   const notes = String(transaction.notes || '');
@@ -59,6 +80,23 @@ const isAutomationCreated = (transaction, tagNamesById = new Map()) => {
     || N8N_EXTERNAL_ID_PATTERN.test(externalId)
     || tagNames.some(tag => isAutomationTagName(tagNameFor(tag, tagNamesById)))
     || (transaction.tag_ids || []).some(tagId => isAutomationTagName(tagNamesById.get(Number(tagId))));
+};
+
+const classifyTransactionRole = (transaction, source, automationCreated) => {
+  const hasN8nPlaceholderTag = hasNamedTag(transaction, value => (
+    N8N_PLACEHOLDER_TAG_NAMES.has(normalizeTagName(value))
+    || LEGACY_PLACEHOLDER_TAG_NAMES.has(normalizeTagName(value))
+  ));
+  const hasManualPlaceholderTag = hasNamedTag(transaction, value => (
+    MANUAL_PLACEHOLDER_TAG_NAMES.has(normalizeTagName(value))
+    || LEGACY_PLACEHOLDER_TAG_NAMES.has(normalizeTagName(value))
+  ));
+  const hasMatchedImportTag = hasNamedTag(transaction, isMatchedImportTagName);
+
+  if (source === IMPORTED_SOURCE) return hasMatchedImportTag ? 'matchedImport' : 'imported';
+  if (source === 'api' && (automationCreated || hasN8nPlaceholderTag)) return 'placeholder';
+  if (source === 'manual' && hasManualPlaceholderTag) return 'placeholder';
+  return 'ordinary';
 };
 
 const bigrams = value => {
@@ -106,11 +144,16 @@ export const normalizeReviewTransaction = (
     ...tagIds.map(tagId => tagNamesById.get(tagId)),
   ].filter(Boolean));
   const automationCreated = isAutomationCreated(transaction, tagNamesById);
-  const origin = USER_ENTERED_SOURCES.has(source)
+  const role = classifyTransactionRole({
+    tagIds,
+    tagNames,
+    tagNamesByTransactionTagId,
+  }, source, automationCreated);
+  const origin = role === 'placeholder'
     ? 'manual'
-    : source === IMPORTED_SOURCE
+    : role === 'imported'
       ? 'imported'
-      : automationCreated ? 'manual' : 'other';
+      : role;
 
   return {
     id: asId(transaction.id),
@@ -131,11 +174,9 @@ export const normalizeReviewTransaction = (
     recurringId: transaction.recurring_id == null ? null : asId(transaction.recurring_id),
     recurringName: transaction.recurring_id == null ? null : `Recurring #${transaction.recurring_id}`,
     source,
-    // Lunch Money labels API-created placeholders as "api" in the normal case.
-    // A Plaid row with n8n/Forecast Magic markers is usually a previously
-    // resolved import that inherited placeholder metadata, so exclude it from
-    // duplicate suggestions instead of treating it as a fresh bank import.
     origin,
+    role,
+    isMatchedImport: role === 'matchedImport',
     isPending: Boolean(transaction.is_pending),
     updatedAt: transaction.updated_at || null,
     automationCreated,
@@ -164,14 +205,9 @@ const dateDifference = (left, right) => {
 };
 
 const candidateId = (manual, imported) => `${manual.id}:${imported.id}`;
-const importedMerchantKey = candidate => [
-  candidate.imported.accountKey,
-  candidate.imported.apiAmount.toFixed(4),
-  normalizePayee(candidate.imported.payee),
-].join('|');
 
 const scorePair = (manual, imported) => {
-  if (manual.origin !== 'manual' || imported.origin !== 'imported') return null;
+  if (manual.role !== 'placeholder' || imported.role !== 'imported') return null;
   if (manual.accountKey !== imported.accountKey) return null;
   if (manual.apiAmount !== imported.apiAmount) return null;
 
@@ -179,33 +215,16 @@ const scorePair = (manual, imported) => {
   const similarity = payeeSimilarity(manual.payee, imported.payee);
   const sameCategory = manual.categoryId != null && manual.categoryId === imported.categoryId;
   const sameRecurring = manual.recurringId != null && manual.recurringId === imported.recurringId;
-  // API placeholders may carry an authorization date several days before the
-  // bank posts the imported transaction. Extend that window only when the
-  // account, amount, payee, and category all strongly identify the same charge.
-  const extendedApiSettlementMatch = manual.source === 'api'
-    && daysApart <= API_SETTLEMENT_MAX_DATE_DIFFERENCE_DAYS
-    && (
-      (similarity >= 0.72 && sameCategory)
-      || (manual.automationCreated && (similarity >= 0.35 || sameCategory || sameRecurring))
-    );
-  if (daysApart > STANDARD_MAX_DATE_DIFFERENCE_DAYS && !extendedApiSettlementMatch) return null;
-
-  const weakEvidenceMatch = !sameCategory
-    && !sameRecurring
-    && similarity < 0.35;
-  if (weakEvidenceMatch) return null;
+  if (daysApart > LOW_MAX_DATE_DIFFERENCE_DAYS) return null;
 
   let confidence;
   if (daysApart <= 1 && similarity >= 0.72) confidence = 'high';
-  else if (extendedApiSettlementMatch) confidence = 'medium';
-  else if (daysApart <= 2 || similarity >= 0.35 || sameCategory || sameRecurring) confidence = 'medium';
+  else if (daysApart <= MEDIUM_MAX_DATE_DIFFERENCE_DAYS && (similarity >= 0.35 || sameCategory || sameRecurring)) confidence = 'medium';
   else confidence = 'low';
 
   const sourceReason = manual.source === 'api'
     ? 'API-created plus imported'
-    : manual.source === 'recurring'
-      ? 'Recurring-created plus imported'
-      : 'Manual plus imported';
+    : 'Manual placeholder plus imported';
   const reasons = ['Exact amount', sourceReason];
   reasons.push(daysApart === 0 ? 'Same date' : `${daysApart}-day date difference`);
   if (similarity >= 0.55) reasons.push('Similar payee');
@@ -248,10 +267,10 @@ const compareCandidates = (left, right) => (
   || left.id.localeCompare(right.id)
 );
 
-export const detectDuplicateCandidates = ({ transactions, ignoredPairIds = new Set(), includeLow = false }) => {
+export const detectDuplicateCandidates = ({ transactions, ignoredPairIds = new Set() }) => {
   const groups = new Map();
   for (const transaction of transactions) {
-    if (!transaction || !['manual', 'imported'].includes(transaction.origin)) continue;
+    if (!transaction || !['placeholder', 'imported'].includes(transaction.role)) continue;
     const key = `${transaction.accountKey}|${transaction.apiAmount.toFixed(4)}`;
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(transaction);
@@ -259,14 +278,14 @@ export const detectDuplicateCandidates = ({ transactions, ignoredPairIds = new S
 
   const candidates = [];
   for (const group of groups.values()) {
-    const manualTransactions = group.filter(transaction => transaction.origin === 'manual');
-    const importedTransactions = group.filter(transaction => transaction.origin === 'imported');
+    const manualTransactions = group.filter(transaction => transaction.role === 'placeholder');
+    const importedTransactions = group.filter(transaction => transaction.role === 'imported');
     for (const manual of manualTransactions) {
       for (const imported of importedTransactions) {
         const id = candidateId(manual, imported);
         if (ignoredPairIds.has(id)) continue;
         const candidate = scorePair(manual, imported);
-        if (candidate && (includeLow || candidate.confidence !== 'low')) candidates.push(candidate);
+        if (candidate) candidates.push(candidate);
       }
     }
   }
@@ -274,15 +293,11 @@ export const detectDuplicateCandidates = ({ transactions, ignoredPairIds = new S
   const selected = [];
   const selectedManualIds = new Set();
   const selectedImportedIds = new Set();
-  const selectedImportedMerchantKeys = new Set();
   for (const candidate of candidates.sort(compareCandidates)) {
     if (selectedManualIds.has(candidate.manual.id) || selectedImportedIds.has(candidate.imported.id)) continue;
-    const merchantKey = importedMerchantKey(candidate);
-    if (candidate.confidence === 'low' && selectedImportedMerchantKeys.has(merchantKey)) continue;
     selected.push(candidate);
     selectedManualIds.add(candidate.manual.id);
     selectedImportedIds.add(candidate.imported.id);
-    selectedImportedMerchantKeys.add(merchantKey);
   }
   return selected.sort((left, right) => (
     confidenceRank[left.confidence] - confidenceRank[right.confidence]
@@ -329,8 +344,10 @@ export const buildMetadataMerge = (manual, imported, options = {}) => {
     payee = options.specifiedPayee.trim();
   }
 
-  const tagIds = imported.tagIds
-    .filter(tagId => !isReviewTagName(imported.tagNamesByTransactionTagId?.[tagId]))
+  const tagIds = unique([
+    ...imported.tagIds.filter(tagId => !isPipelineTagName(imported.tagNamesByTransactionTagId?.[tagId])),
+    options.matchedImportTagId == null ? null : Number(options.matchedImportTagId),
+  ])
     .sort((a, b) => a - b);
   return {
     update: {

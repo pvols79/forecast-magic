@@ -3,20 +3,32 @@ import {
   buildMetadataMerge, detectDuplicateCandidates, normalizeReviewTransaction,
 } from './duplicateReview';
 
-const tagNames = new Map([[1, 'LM Manual'], [2, 'Forecast Magic Pending'], [3, 'Household']]);
+const tagNames = new Map([
+  [1, 'LM Manual'],
+  [2, 'Forecast Magic Pending'],
+  [3, 'Household'],
+  [4, 'matched_import'],
+  [5, 'n8n_proc'],
+]);
 
-const transaction = overrides => normalizeReviewTransaction({
-  id: overrides.id || Math.random().toString(),
+const transaction = overrides => {
+  const source = overrides.source || 'manual';
+  const tagIds = overrides.tag_ids ?? (
+    source === 'manual' ? [1] : source === 'api' ? [5] : []
+  );
+  return normalizeReviewTransaction({
+    id: overrides.id || Math.random().toString(),
   plaid_account_id: 1,
   date: '2026-08-14',
   amount: '20.79',
   payee: 'Spotify',
-  source: 'manual',
+  source,
   category_id: 10,
   notes: '',
-  tag_ids: [],
+    tag_ids: tagIds,
   ...overrides,
-}, new Map([[10, 'Entertainment'], [11, 'Subscriptions']]), tagNames);
+  }, new Map([[10, 'Entertainment'], [11, 'Subscriptions']]), tagNames);
+};
 
 const scan = (transactions, options = {}) => detectDuplicateCandidates({ transactions, ...options });
 
@@ -39,12 +51,12 @@ describe('duplicate transaction detection', () => {
     expect(candidates[0]).toMatchObject({
       confidence: 'high',
       reasons: expect.arrayContaining(['API-created plus imported']),
-      manual: { id: '1', source: 'api', origin: 'manual' },
+      manual: { id: '1', source: 'api', origin: 'manual', role: 'placeholder' },
       imported: { id: '2', source: 'plaid', origin: 'imported' },
     });
   });
 
-  it('allows a strong API-created/imported match across a four-day settlement delay', () => {
+  it('shows a strong four-day API-created/imported match as low confidence', () => {
     const candidates = scan([
       transaction({
         id: 1,
@@ -66,7 +78,7 @@ describe('duplicate transaction detection', () => {
 
     expect(candidates).toHaveLength(1);
     expect(candidates[0]).toMatchObject({
-      confidence: 'medium',
+      confidence: 'low',
       daysApart: 4,
       reasons: expect.arrayContaining([
         'Exact amount',
@@ -78,16 +90,16 @@ describe('duplicate transaction detection', () => {
     });
   });
 
-  it('does not extend the settlement window for weak API or ordinary manual matches', () => {
+  it('shows weak placeholder matches within five days as low confidence', () => {
     expect(scan([
       transaction({ id: 1, source: 'api', date: '2026-09-05', payee: 'Google One', category_id: 11 }),
       transaction({ id: 2, source: 'plaid', date: '2026-09-09', payee: 'Unrelated Merchant', category_id: 11 }),
-    ], { includeLow: true })).toEqual([]);
+    ])).toMatchObject([{ confidence: 'low' }]);
 
     expect(scan([
-      transaction({ id: 3, source: 'manual', date: '2026-09-05', payee: 'Google One', category_id: 11 }),
+      transaction({ id: 3, source: 'manual', date: '2026-09-05', payee: 'Google One', category_id: 11, tag_ids: [] }),
       transaction({ id: 4, source: 'plaid', date: '2026-09-09', payee: 'Google One', category_id: 11 }),
-    ], { includeLow: true })).toEqual([]);
+    ])).toEqual([]);
   });
 
   it('does not match API-created and imported transactions more than five days apart', () => {
@@ -97,7 +109,7 @@ describe('duplicate transaction detection', () => {
     ], { includeLow: true })).toEqual([]);
   });
 
-  it('treats a recurring-created transaction as user-entered for duplicate review', () => {
+  it('does not treat recurring-created rows as duplicate-review placeholders', () => {
     const candidates = scan([
       transaction({
         id: 1,
@@ -116,42 +128,30 @@ describe('duplicate transaction detection', () => {
       }),
     ]);
 
-    expect(candidates).toHaveLength(1);
-    expect(candidates[0]).toMatchObject({
-      confidence: 'medium',
-      reasons: expect.arrayContaining([
-        'Recurring-created plus imported',
-        '3-day date difference',
-        'Same recurring item',
-      ]),
-      manual: { id: '1', source: 'recurring', origin: 'manual' },
-      imported: { id: '2', source: 'plaid', origin: 'imported' },
-    });
+    expect(candidates).toEqual([]);
   });
 
-  it('rejects exact-amount nearby-date pairs when payee and category evidence is weak', () => {
+  it('shows exact-amount nearby-date placeholder pairs as low when payee and category evidence is weak', () => {
     const transactions = [
       transaction({ id: 1, source: 'manual', payee: 'Family music plan', category_id: null }),
       transaction({ id: 2, source: 'plaid', payee: 'PAYMENT PROCESSOR 8842', date: '2026-08-16', category_id: null }),
     ];
-    expect(scan(transactions)).toEqual([]);
-    expect(scan(transactions, { includeLow: true })).toEqual([]);
+    expect(scan(transactions)).toMatchObject([{ confidence: 'low' }]);
   });
 
-  it('rejects plausible three-day weak matches even when low confidence is shown', () => {
+  it('shows plausible three-day weak placeholder matches as low confidence', () => {
     const transactions = [
       transaction({ id: 1, source: 'manual', payee: 'Family music plan', category_id: null }),
       transaction({ id: 2, source: 'plaid', payee: 'PAYMENT PROCESSOR 8842', date: '2026-08-17', category_id: null }),
     ];
-    expect(scan(transactions)).toEqual([]);
-    expect(scan(transactions, { includeLow: true })).toEqual([]);
+    expect(scan(transactions)).toMatchObject([{ confidence: 'low' }]);
   });
 
   it('never matches different accounts, amounts, or dates outside three days', () => {
     const manual = transaction({ id: 1, source: 'manual' });
     expect(scan([manual, transaction({ id: 2, source: 'plaid', plaid_account_id: 2 })])).toEqual([]);
     expect(scan([manual, transaction({ id: 3, source: 'plaid', amount: '21.79' })])).toEqual([]);
-    expect(scan([manual, transaction({ id: 4, source: 'plaid', date: '2026-08-18' })])).toEqual([]);
+    expect(scan([manual, transaction({ id: 4, source: 'plaid', date: '2026-08-20' })])).toEqual([]);
   });
 
   it('does not treat manual/manual or imported/imported pairs as the primary duplicate scenario', () => {
@@ -180,6 +180,20 @@ describe('duplicate transaction detection', () => {
       inheritedImport,
       transaction({ id: 3, source: 'plaid', notes: '' }),
     ], { includeLow: true })).toEqual([]);
+  });
+
+  it('excludes previously matched imports from duplicate suggestions', () => {
+    expect(scan([
+      transaction({ id: 1, source: 'api', amount: '75.00' }),
+      transaction({ id: 2, source: 'plaid', amount: '75.00', tag_ids: [4] }),
+    ])).toEqual([]);
+  });
+
+  it('does not match different amounts even when names and dates are close', () => {
+    expect(scan([
+      transaction({ id: 1, source: 'manual', payee: 'Britainy Harris', amount: '40.00' }),
+      transaction({ id: 2, source: 'plaid', payee: 'Esteban Hernandez', amount: '75.00' }),
+    ])).toEqual([]);
   });
 
   it('keeps plaid-source rows importable when marked by non-CapOne n8n workflows', () => {
@@ -267,7 +281,7 @@ describe('duplicate transaction detection', () => {
     expect(candidates.map(candidate => candidate.id)).toEqual(['manual-29:imported-01']);
   });
 
-  it('suppresses low-confidence shadows for the same imported merchant and amount', () => {
+  it('keeps separate one-to-one pairs when both sides are unique', () => {
     const candidates = scan([
       transaction({
         id: 'api-current',
@@ -306,6 +320,7 @@ describe('duplicate transaction detection', () => {
 
     expect(candidates.map(candidate => candidate.id)).toEqual([
       'api-current:imported-current',
+      'manual-old:imported-old',
     ]);
   });
 });

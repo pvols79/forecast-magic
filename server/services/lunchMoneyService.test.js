@@ -67,12 +67,12 @@ describe('LunchMoneyService transaction balance treatment', () => {
     });
   });
 
-  it.each(['n8n_proc', 'N8N Pending'])('does not deduct an API entry with only the old %s tag', tag => {
+  it.each(['n8n_proc', 'N8N Pending'])('marks an API entry with %s as unreflected', tag => {
     const service = new LunchMoneyService();
     expect(service.normalizeTransaction({
       id: 93, plaid_account_id: 5, date: '2026-09-05', amount: '100.00',
       source: 'api', is_pending: false, tag_ids: [41],
-    }, '2026-09-05', new Map([[41, tag]])).balanceTreatment).toBe('included');
+    }, '2026-09-05', new Map([[41, tag]])).balanceTreatment).toBe('unreflected');
   });
 
   it('keeps an untagged historical API transaction in the synced balance', () => {

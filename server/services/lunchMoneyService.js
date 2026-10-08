@@ -97,6 +97,20 @@ export class LunchMoneyService {
     return response.data;
   }
 
+  async post(path, data, params = {}) {
+    const apiKey = this.getApiKey();
+    if (!apiKey) {
+      const error = new Error('Lunch Money API key is not configured.');
+      error.status = 401;
+      throw error;
+    }
+    const response = await axios.post(`${config.lunchMoneyBaseUrl}${path}`, data, {
+      headers: { Authorization: `Bearer ${apiKey}` },
+      params,
+    });
+    return response.data;
+  }
+
   async delete(path, data) {
     const apiKey = this.getApiKey();
     if (!apiKey) {
@@ -247,6 +261,16 @@ export class LunchMoneyService {
       name: tag.name,
       archived: Boolean(tag.archived_at || tag.archived),
     }));
+  }
+
+  async createTag(tag) {
+    const data = await this.post('/tags', tag);
+    const created = data?.tag || data;
+    return {
+      id: Number(created.id),
+      name: created.name,
+      archived: Boolean(created.archived_at || created.archived),
+    };
   }
 
   async getTransactions(startDate, endDate, anchorDate = startDate) {

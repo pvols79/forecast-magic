@@ -6,7 +6,7 @@ import { getTransactionBalanceTreatment } from '../../src/transactionBalance.js'
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const N8N_NOTE_PATTERN = /created from .* by n8n/i;
 const N8N_EXTERNAL_ID_PATTERN = /^n8n-/i;
-const PENDING_TAG_NAMES = new Set(['forecastmagicpending']);
+const PENDING_TAG_NAMES = new Set(['forecastmagicpending', 'n8nproc', 'n8npending', 'lmmanual']);
 const N8N_TAG_NAMES = new Set(['n8nproc', 'n8nprocessed', 'n8ncreated']);
 
 const normalizeName = value => String(value || '')
@@ -40,7 +40,7 @@ const balanceTreatmentFor = transaction => getTransactionBalanceTreatment({
   accountSource: transaction.accountKey?.split(':')[0] || 'plaid',
   lunchMoneySource: transaction.source,
   isPending: transaction.isPending,
-  tagNames: transaction.tagNames || (transaction.hasPendingTag ? ['Forecast Magic Pending'] : []),
+  tagNames: transaction.tagNames || (transaction.hasPendingTag ? ['n8n_proc'] : []),
 });
 
 const isPlaceholder = transaction => ['api', 'manual'].includes(transaction.source)

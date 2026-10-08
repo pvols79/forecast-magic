@@ -12,15 +12,15 @@ import {
 } from './financialAudit.js';
 
 describe('financial audit domain', () => {
-  it.each(['n8n_proc', 'N8N Pending'])('excludes the old %s tag from outstanding placeholder totals', tag => {
+  it.each(['n8n_proc', 'N8N Pending'])('counts the %s tag as an outstanding placeholder signal', tag => {
     const transaction = normalizeAuditTransaction({
       id: 1, plaid_account_id: 1, date: '2026-09-05', amount: '100.00',
       source: 'api', tag_ids: [1], notes: 'Created from Capital One Gmail alert by n8n.',
     }, new Map([[1, tag]]));
-    expect(transaction.hasPendingTag).toBe(false);
+    expect(transaction.hasPendingTag).toBe(true);
     expect(buildBalanceBridge({ lunchMoneyBalanceCents: 100000, transactions: [transaction] }))
-      .toMatchObject({ taggedN8nPlaceholderCents: 0, expectedAvailableCents: 100000 });
-    expect(findStalePendingTransactions([transaction], '2026-09-15')).toEqual([]);
+      .toMatchObject({ taggedN8nPlaceholderCents: -10000, expectedAvailableCents: 90000 });
+    expect(findStalePendingTransactions([transaction], '2026-09-15')).toHaveLength(1);
   });
 
   it('normalizes Lunch Money signs and compound account identity', () => {

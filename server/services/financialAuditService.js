@@ -184,7 +184,7 @@ export class FinancialAuditService {
       findings.push(finding(
         `untagged-n8n-${transaction.transactionId}`, 'warning', 'tag_compliance',
         'n8n-created transaction lacks the pending tag',
-        `${transaction.payee} on ${transaction.date} was identified as n8n-created but lacks Forecast Magic Pending.`,
+        `${transaction.payee} on ${transaction.date} was identified as n8n-created but lacks n8n_proc.`,
         { transaction: publicTransaction(transaction) }
       ));
     }

@@ -1,5 +1,7 @@
 const PENDING_PLACEHOLDER_TAGS = new Set([
   'forecastmagicpending',
+  'n8nproc',
+  'n8npending',
   'lmmanual',
 ]);
 const PLACEHOLDER_SOURCES = new Set(['api', 'manual']);

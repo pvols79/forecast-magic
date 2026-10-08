@@ -18,8 +18,8 @@ Each run stores an immutable snapshot for one compound account key, such as `pla
 
 - Capital One versus Lunch Money balance comparison
 - Imported, native-pending, n8n-created, and tagged-placeholder transaction totals
-- n8n-created transaction candidates missing `Forecast Magic Pending`
-- Suspicious use of the pending tag on non-n8n transactions
+- n8n-created transaction candidates missing `n8n_proc`
+- Suspicious use of pending-placeholder tags on non-placeholder transactions
 - Possible duplicates from the existing Duplicate Review rules
 - Capital One transactions missing from Lunch Money when the bank evidence is current and date-covered
 - Native pending and tagged placeholders still open beyond the configured business-day thresholds
@@ -138,7 +138,7 @@ Content-Type: application/json
 
 Amounts follow Forecast Magic's internal convention: positive is money entering the account and negative is money leaving it. The endpoint is idempotent by account and `externalId`.
 
-Use an `externalId` that starts with `n8n-` for every workflow-created placeholder, such as `n8n-capone-gmail-...` or `n8n-venmo-gmail-...`. This evidence call complements the Lunch Money tags. The created Lunch Money transaction should continue to receive `Forecast Magic Pending` until Duplicate Review replaces it with the settled Plaid import.
+Use an `externalId` that starts with `n8n-` for every workflow-created placeholder, such as `n8n-capone-gmail-...` or `n8n-venmo-gmail-...`. This evidence call complements the Lunch Money tags. The created Lunch Money transaction should receive `n8n_proc` until Duplicate Review replaces it with the settled Plaid import, which is then tagged `matched_import`.
 
 ## MCP Connector
 
@@ -177,7 +177,7 @@ After at least one audit has run, `/api/reporting/daily-highlight` includes a co
 
 ## Recommended Routine
 
-1. Keep the n8n pending tag and evidence call in the Capital One email workflow.
+1. Keep the `n8n_proc` pending-placeholder tag and evidence call in the Capital One and Venmo email workflows.
 2. Import a fresh Capital One CSV and current available balance when a full reconciliation is needed.
 3. Run the audit.
 4. Review critical findings first, then warnings and unknowns.

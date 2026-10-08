@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
-  Alert, AlertIcon, Badge, Box, Button, Checkbox, Flex, FormControl, FormLabel,
+  Alert, AlertIcon, Badge, Box, Button, Flex, FormControl, FormLabel,
   HStack, Heading, IconButton, Input, ListItem, Modal, ModalBody, ModalCloseButton,
   ModalContent, ModalFooter, ModalHeader, ModalOverlay, Select, Spinner, Table,
   Tbody, Td, Textarea, Text as ChakraText, Th, Thead, Tr, UnorderedList, VStack,
@@ -179,7 +179,6 @@ const DuplicateConfirmation = ({ candidate, isOpen, onClose, onConfirm, resolvin
 
 const DuplicateReview = ({ accountKey, onRefresh, scanRequest = 0 }) => {
   const [candidates, setCandidates] = useState([]);
-  const [showLow, setShowLow] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [hasScanned, setHasScanned] = useState(false);
   const [scanning, setScanning] = useState(false);
@@ -191,17 +190,16 @@ const DuplicateReview = ({ accountKey, onRefresh, scanRequest = 0 }) => {
 
   useEffect(() => {
     setCandidates([]);
-    setShowLow(false);
     setExpanded(false);
     setHasScanned(false);
     setMessage(null);
   }, [accountKey]);
 
-  const scan = useCallback(async (includeLow = showLow) => {
+  const scan = useCallback(async () => {
     setScanning(true);
     setMessage(null);
     try {
-      const result = await scanDuplicateTransactions(accountKey, includeLow);
+      const result = await scanDuplicateTransactions(accountKey, true);
       setCandidates(result.candidates);
       setHasScanned(true);
       setExpanded(result.candidates.length > 0 || expanded);
@@ -214,16 +212,11 @@ const DuplicateReview = ({ accountKey, onRefresh, scanRequest = 0 }) => {
     } finally {
       setScanning(false);
     }
-  }, [accountKey, expanded, showLow]);
+  }, [accountKey, expanded]);
 
   useEffect(() => {
     if (scanRequest > 0) scan();
   }, [scanRequest, scan]);
-
-  const handleLowConfidence = async checked => {
-    setShowLow(checked);
-    if (hasScanned) await scan(checked);
-  };
 
   const handleRefresh = async () => {
     setRefreshing(true);
@@ -292,9 +285,6 @@ const DuplicateReview = ({ accountKey, onRefresh, scanRequest = 0 }) => {
                 Confirming Duplicate updates the imported transaction and permanently deletes the manual transaction.
               </ChakraText>
             </Box>
-            <Checkbox isChecked={showLow} onChange={event => handleLowConfidence(event.target.checked)} size="sm">
-              Show low-confidence matches
-            </Checkbox>
           </Flex>
           {message && <Alert status={message.status} mx={4} mb={3} py={2}><AlertIcon />{message.text}</Alert>}
           {scanning ? (

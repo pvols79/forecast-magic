@@ -2,6 +2,14 @@ import { describe, expect, it, vi } from 'vitest';
 import { normalizeReviewTransaction, transactionFingerprint } from '../domain/duplicateReview';
 import { DuplicateReviewService } from './duplicateReviewService';
 
+const testTagNames = new Map([
+  [1, 'LM Manual'],
+  [2, 'Forecast Magic Pending'],
+  [3, 'Household'],
+  [4, 'matched_import'],
+  [5, 'n8n_proc'],
+]);
+
 const raw = overrides => ({
   id: 1,
   plaid_account_id: 1,
@@ -17,12 +25,16 @@ const raw = overrides => ({
 });
 
 const fingerprints = (manualRaw, importedRaw) => ({
-  manualFingerprint: transactionFingerprint(normalizeReviewTransaction(manualRaw)),
-  importedFingerprint: transactionFingerprint(normalizeReviewTransaction(importedRaw)),
+  manualFingerprint: transactionFingerprint(normalizeReviewTransaction(manualRaw, new Map(), testTagNames)),
+  importedFingerprint: transactionFingerprint(normalizeReviewTransaction(importedRaw, new Map(), testTagNames)),
 });
 
 const setup = ({ updateError, updateReturn, deleteError, manualSource = 'manual' } = {}) => {
-  const manual = raw({ id: 1, source: manualSource });
+  const manual = raw({
+    id: 1,
+    source: manualSource,
+    tag_ids: manualSource === 'api' ? [5] : manualSource === 'manual' ? [1] : [],
+  });
   let imported = raw({
     id: 2, source: 'plaid', date: '2026-08-15', payee: 'SPOTIFY USA',
     category_id: 11, notes: 'Imported note', tag_ids: [2],
@@ -34,14 +46,19 @@ const setup = ({ updateError, updateReturn, deleteError, manualSource = 'manual'
       { id: 10, name: 'Entertainment' }, { id: 11, name: 'Subscriptions' },
     ]),
     getTags: vi.fn(async () => [
-      { id: 1, name: 'LM Manual' }, { id: 2, name: 'Forecast Magic Pending' }, { id: 3, name: 'Household' },
+      { id: 1, name: 'LM Manual' },
+      { id: 2, name: 'Forecast Magic Pending' },
+      { id: 3, name: 'Household' },
+      { id: 4, name: 'matched_import' },
+      { id: 5, name: 'n8n_proc' },
     ]),
+    createTag: vi.fn(async tag => ({ id: 4, name: tag.name, archived: false })),
     getTransaction: vi.fn(async id => String(id) === '1' ? manual : imported),
     updateTransaction: vi.fn(async (id, update) => {
       calls.push(['update', String(id), update]);
       if (updateError) throw updateError;
-      if (updateReturn !== undefined) return updateReturn;
       imported = { ...imported, ...update };
+      if (updateReturn !== undefined) return updateReturn;
       return imported;
     }),
     deleteTransaction: vi.fn(async id => {
@@ -80,7 +97,7 @@ describe('DuplicateReviewService', () => {
     expect(calls.map(call => call.slice(0, 2))).toEqual([['update', '2'], ['delete', '1']]);
     expect(calls[0][2]).toMatchObject({
       payee: 'Spotify Family', category_id: 10,
-      notes: 'Imported note\n\nManual note: Manual note', tag_ids: [],
+      notes: 'Imported note\n\nManual note: Manual note', tag_ids: [4],
     });
     expect(calls[0][2]).not.toHaveProperty('date');
     expect(calls[0][2]).not.toHaveProperty('amount');
@@ -116,21 +133,10 @@ describe('DuplicateReviewService', () => {
     expect(calls.map(call => call.slice(0, 2))).toEqual([['update', '2'], ['delete', '1']]);
   });
 
-  it('detects and safely resolves a recurring-created transaction paired with an imported transaction', async () => {
-    const { service, manual, imported, calls } = setup({ manualSource: 'recurring' });
+  it('does not treat recurring-created transactions as duplicate placeholders', async () => {
+    const { service } = setup({ manualSource: 'recurring' });
     const scan = await service.scan('plaid:1', { anchorDate: '2026-08-15' });
-    expect(scan.candidates).toHaveLength(1);
-    expect(scan.candidates[0]).toMatchObject({
-      confidence: 'medium',
-      manual: { source: 'recurring', origin: 'manual' },
-      imported: { source: 'plaid', origin: 'imported' },
-    });
-
-    await service.resolve({
-      accountKey: 'plaid:1', manualTransactionId: '1', importedTransactionId: '2',
-      ...fingerprints(manual, imported),
-    });
-    expect(calls.map(call => call.slice(0, 2))).toEqual([['update', '2'], ['delete', '1']]);
+    expect(scan.candidates).toHaveLength(0);
   });
 
   it('does not delete the manual transaction when the metadata update fails', async () => {

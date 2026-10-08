@@ -95,7 +95,7 @@ export const createFinancialAuditMcpServer = ({
 
   server.registerTool('check_forecast_magic_tags', {
     title: 'Check transaction tags',
-    description: 'Report n8n-created transactions missing Forecast Magic Pending and suspicious uses of that tag.',
+    description: 'Report n8n-created transactions missing n8n_proc and suspicious pending-placeholder tags.',
     inputSchema: accountSchema,
     annotations: readOnlyAnnotations,
   }, async ({ accountKey }) => result(service.getTagCompliance(accountKey)));
