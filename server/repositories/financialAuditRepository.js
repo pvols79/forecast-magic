@@ -63,8 +63,8 @@ export class FinancialAuditRepository {
           run_id, account_key, transaction_id, source, date, amount_cents, payee,
           original_payee, category_id, recurring_id, is_pending, tag_ids_json,
           is_n8n, has_pending_tag, tag_names_json, notes, external_id,
-          created_at_api, updated_at_api, fingerprint
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          created_at_api, updated_at_api, fingerprint, settlement_json
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
       for (const transaction of transactions) {
         insertTransaction.run(
@@ -76,7 +76,11 @@ export class FinancialAuditRepository {
           transaction.isN8n ? 1 : 0, transaction.hasPendingTag ? 1 : 0,
           JSON.stringify(transaction.tagNames || []), transaction.notes || null,
           transaction.externalId || null, transaction.createdAt || null,
-          transaction.updatedAt || null, transaction.fingerprint
+          transaction.updatedAt || null, transaction.fingerprint,
+          JSON.stringify({ effectiveStatus: transaction.effectiveStatus,
+            auditClearance: transaction.auditClearance, lmIsPending: transaction.lmIsPending,
+            pendingExplanation: transaction.pendingExplanation,
+            clearanceNeedsReview: transaction.clearanceNeedsReview })
         );
       }
       const insertFinding = db.prepare(`
@@ -146,6 +150,7 @@ export class FinancialAuditRepository {
       WHERE ${clauses.join(' AND ')}
       ORDER BY date DESC, transaction_id DESC
     `).all(...values).map(row => ({
+      ...parseJson(row.settlement_json, {}),
       transactionId: row.transaction_id,
       accountKey: row.account_key,
       source: row.source,

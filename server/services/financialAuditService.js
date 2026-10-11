@@ -1,4 +1,6 @@
 import { config } from '../config.js';
+import { AuditClearanceRepository } from '../repositories/auditClearanceRepository.js';
+import { applyAuditClearance } from '../domain/auditClearance.js';
 import {
   assessAuditHealth, buildBalanceBridge, compareObservedTransactions,
   findStalePendingTransactions, findTagComplianceIssues, matchExternalTransactions,
@@ -42,6 +44,9 @@ const statementIsFresh = (statement, anchorDate) => Boolean(
 );
 
 const publicTransaction = transaction => ({
+  effectiveStatus: transaction.effectiveStatus,
+  auditClearance: transaction.auditClearance,
+  lmIsPending: transaction.lmIsPending,
   transactionId: transaction.transactionId,
   accountKey: transaction.accountKey,
   source: transaction.source,
@@ -56,6 +61,7 @@ const publicTransaction = transaction => ({
   tagNames: transaction.tagNames,
   isN8n: transaction.isN8n,
   hasPendingTag: transaction.hasPendingTag,
+  pendingExplanation: transaction.pendingExplanation,
 });
 
 const lifecycleCandidates = (evidence, transactions) => evidence.flatMap(item => {
@@ -82,7 +88,8 @@ const lifecycleCandidates = (evidence, transactions) => evidence.flatMap(item =>
 });
 
 export class FinancialAuditService {
-  constructor({ repository, lunchMoney, analytics, duplicateReview } = {}) {
+  constructor({ repository, lunchMoney, analytics, duplicateReview, clearances } = {}) {
+    this.clearances = clearances || new AuditClearanceRepository();
     this.repository = repository || new FinancialAuditRepository();
     this.lunchMoney = lunchMoney || new LunchMoneyService();
     this.analytics = analytics || new FinancialAnalyticsService({ lunchMoney: this.lunchMoney });
@@ -113,9 +120,11 @@ export class FinancialAuditService {
       throw error;
     }
     const tagNamesById = new Map(tags.map(tag => [Number(tag.id), tag.name]));
+    const clearances = this.clearances.list(accountKey);
     const transactions = rawTransactions
       .map(transaction => normalizeAuditTransaction(transaction, tagNamesById))
-      .filter(transaction => transaction?.accountKey === accountKey);
+      .filter(transaction => transaction?.accountKey === accountKey)
+      .map(transaction => applyAuditClearance(transaction, clearances));
     const latestStatement = this.repository.getLatestStatementImport(accountKey);
     const statementTransactions = latestStatement
       ? this.repository.listStatementTransactions(latestStatement.id)
@@ -152,7 +161,7 @@ export class FinancialAuditService {
       findings.push(finding(
         'capital-one-evidence-missing', 'unknown', 'source_freshness',
         'Capital One evidence is unavailable',
-        'Import a Capital One CSV and provide current ledger and available balances before judging missing transactions.'
+        'This saved snapshot has no stored bank evidence. For a model-led reconciliation, query live LM data and compare with Capital One evidence attached in the conversation; no upload is required.'
       ));
     } else if (!freshStatement) {
       findings.push(finding(
@@ -192,8 +201,8 @@ export class FinancialAuditService {
       const severity = transaction.businessDaysOpen > config.auditPendingCriticalBusinessDays ? 'critical' : 'warning';
       findings.push(finding(
         `stale-pending-${transaction.transactionId}`, severity, 'stale_pending',
-        'Pending transaction has not cleared',
-        `${transaction.payee} has remained pending for ${transaction.businessDaysOpen} business days.`,
+        'Older transaction still has a pending signal',
+        `${transaction.payee} is dated ${transaction.businessDaysOpen} business days ago and still has a native pending flag or placeholder tag. This does not prove it remains unsettled at the bank; it may be an intentionally retained manual/API replacement. Verify bank evidence before changing its tags or flag.`,
         { transaction: publicTransaction(transaction), businessDaysOpen: transaction.businessDaysOpen }
       ));
     }

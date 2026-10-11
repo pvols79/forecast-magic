@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import { parse } from 'csv-parse/sync';
 import { payeeSimilarity } from './duplicateReview.js';
-import { getTransactionBalanceTreatment } from '../../src/transactionBalance.js';
+import { explainTransactionPending, getTransactionBalanceTreatment } from '../../src/transactionBalance.js';
 
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const N8N_NOTE_PATTERN = /created from .* by n8n/i;
@@ -36,7 +36,7 @@ const accountKeyFor = transaction => transaction.manual_account_id != null
 
 const unique = values => [...new Set(values.filter(value => value != null))];
 
-const balanceTreatmentFor = transaction => getTransactionBalanceTreatment({
+const balanceTreatmentFor = transaction => transaction.auditClearance ? 'included' : getTransactionBalanceTreatment({
   accountSource: transaction.accountKey?.split(':')[0] || 'plaid',
   lunchMoneySource: transaction.source,
   isPending: transaction.isPending,
@@ -100,6 +100,10 @@ export const normalizeAuditTransaction = (transaction, tagNamesById = new Map())
     isPending: result.isPending,
     tags: [...result.tagIds].sort((a, b) => a - b),
   })).digest('hex');
+  result.pendingExplanation = explainTransactionPending({
+    accountSource: accountKey.split(':')[0], lunchMoneySource: result.source,
+    isPending: result.isPending, tagNames,
+  });
   return result;
 };
 
@@ -246,7 +250,7 @@ export const buildBalanceBridge = ({ lunchMoneyBalanceCents, capitalOneLedgerCen
 };
 
 export const findTagComplianceIssues = transactions => ({
-  untaggedN8nCandidates: transactions.filter(transaction => transaction.source === 'api' && transaction.isN8n && !transaction.hasPendingTag),
+  untaggedN8nCandidates: transactions.filter(transaction => !transaction.auditClearance && transaction.source === 'api' && transaction.isN8n && !transaction.hasPendingTag),
   stalePendingCandidates: transactions.filter(transaction => isPlaceholder(transaction) && transaction.hasPendingTag && !transaction.isN8n),
 });
 

@@ -1,8 +1,10 @@
 import express, { Router } from 'express';
-import { requireAuditIngest, requireAuditRead } from '../auth.js';
+import { requireAdmin, requireAuditIngest, requireAuditRead } from '../auth.js';
+import { AuditClearanceService } from '../services/auditClearanceService.js';
 import { getDateInTimezone } from '../domain/periods.js';
 import { SettingsRepository } from '../repositories/settingsRepository.js';
 import { FinancialAuditService } from '../services/financialAuditService.js';
+import { LunchMoneyReadService } from '../services/lunchMoneyReadService.js';
 
 const csvBody = express.text({
   type: ['text/csv', 'application/csv', 'text/plain'],
@@ -49,9 +51,34 @@ export const createFinancialAuditRouter = (
   service = new FinancialAuditService(),
   settings = new SettingsRepository(),
   readGuard = requireAuditRead,
-  ingestGuard = requireAuditIngest
+  ingestGuard = requireAuditIngest,
+  reader = new LunchMoneyReadService(),
+  clearances = new AuditClearanceService(),
+  adminGuard = requireAdmin
 ) => {
   const router = Router();
+  router.get('/clearances', readGuard, (request, response) => {
+    response.json(clearances.list(request.query.accountKey));
+  });
+  router.post('/clearances', adminGuard, async (request, response) => {
+    response.status(201).json(await clearances.clear(request.body || {}));
+  });
+  router.delete('/clearances/:transactionId', adminGuard, (request, response) => {
+    response.json(clearances.revoke(request.query.accountKey, request.params.transactionId));
+  });
+  router.get('/lunch-money/reference', readGuard, async (request, response) => {
+    response.json(await reader.getReferenceData());
+  });
+  router.get('/reconciliation-data', readGuard, async (request, response) => {
+    response.json(await reader.getTransactions({
+      accountKey: request.query.accountKey,
+      startDate: request.query.startDate,
+      endDate: request.query.endDate,
+      paddingDays: request.query.paddingDays == null ? 5 : Number(request.query.paddingDays),
+      offset: request.query.offset == null ? 0 : Number(request.query.offset),
+      limit: request.query.limit == null ? 200 : Number(request.query.limit),
+    }));
+  });
   const anchorDateFor = request => request.query.anchorDate
     || request.body?.anchorDate
     || getDateInTimezone(new Date(), settings.get('timezone') || 'UTC');

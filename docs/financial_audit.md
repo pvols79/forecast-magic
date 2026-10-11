@@ -4,7 +4,81 @@ Forecast Magic includes a read-only financial audit layer for reconciling the ev
 
 ## Evidence Model
 
-The audit keeps three kinds of evidence separate:
+### Conversational Queries And Reconciliation (Default)
+
+The MCP server provides read-only access to live Lunch Money data. Evidence files
+stay with the model in the conversation; **no CSV upload, ingest token, database
+import, or previous audit run is required**.
+
+1. Use `get_lunch_money_reference_data` to discover accounts, current LM balances,
+   categories and tags for general support or reconciliation.
+2. Use `query_lunch_money_transactions` with `accountKey`, `startDate`, `endDate`,
+   and optionally `paddingDays` (0-5). `run_financial_health_audit` uses the same
+   live read path, with five days of padding and a default 90-day period.
+3. Read all result pages using `pagination.nextOffset` until `hasMore` is false.
+   Default page size is 200; maximum is 500. Each request fetches live data, so
+   avoid modifying LM during a multi-page reconciliation. Results are not an
+   immutable saved snapshot.
+4. The model reads the user-supplied files and performs the comparison itself.
+   Capital One CSV is authoritative for the account and posted records it covers.
+   Venmo statements and screenshots are supplemental. Do not require uploading
+   those files to Forecast Magic or direct the user to an upload portal.
+5. Match records one-to-one using signed amounts, counts, dates and payee/metadata.
+   Allow up to five days of posting drift. Separate unresolved ambiguity, date
+   boundaries and pending placeholders from confirmed missing/extra posted items.
+   An API/manual placeholder absent from a posted CSV is not automatically extra.
+6. `n8n_proc` and `LM Manual` indicate placeholders; `matched_import` indicates
+   cleared historical lineage. Preserve source, notes, tags, native pending state,
+   recurring links and raw metadata when assessing a match. Inspect split/group
+   relationships before counting; LM's default register representation is used.
+
+Transaction results retain the original LM record in `raw`. Normalized
+`amountCents` uses LM base currency with positive inflow and negative outflow;
+raw LM amounts have the opposite sign. Check currency and conversion before
+comparing a bank amount. No automatic bank-reconciled verdict is returned by the
+live query: the model must substantiate it using the attached evidence.
+
+Equivalent read-token REST endpoints:
+
+```text
+GET /api/financial-audit/lunch-money/reference
+GET /api/financial-audit/reconciliation-data?accountKey=plaid:123&startDate=2026-09-01&endDate=2026-10-10&paddingDays=5&offset=0&limit=200
+```
+
+### Explaining Pending Records
+
+Each normalized live transaction includes `pendingExplanation`: the native LM
+`is_pending` flag, applicable placeholder tags, classification, forecast balance
+treatment, and resolution guidance. Manual/API source, n8n notes and transaction
+age alone do not establish pending status. Placeholder tags never expire.
+Legacy `Forecast Magic Pending` and `n8n_pending` tags still count alongside
+`n8n_proc` and `LM Manual`. A settled Plaid record does not become a placeholder
+merely by inheriting those tags. `matched_import` is not an override for a native
+pending flag or placeholder tags on a manual/API record.
+
+An older pending signal is a review candidate, not proof of an unsettled bank
+charge. If a user accidentally deleted the import and deliberately retains a
+manual/API replacement, first verify the posted bank row and ensure it has only
+one LM representative. Then remove all placeholder tags from that replacement.
+If LM still reports `is_pending=true`, investigate the native status separately;
+tag removal alone cannot clear it. The [LM v2 specification](https://lunchmoney.dev/v2/openapi)
+defines `updateTransactionObject.is_pending` as system-defined and
+`x-updatable: false`: values supplied in updates are ignored. Setting
+`status=reviewed` changes review state, not settlement. The audit exposes
+`nativePendingEditableViaApi: false` and a `resolutionAction` so a model cannot
+promise an unsupported native status change. An admin-authorized `tag_ids` update
+can reconcile a tag-only placeholder after bank verification; preserve unrelated
+tags. The read-only MCP does not execute that update. For unexpected native pending,
+inspect the actual source and Plaid metadata and consult LM support rather than
+assuming Capital One supplied it. Preserve an explanatory note rather than
+mislabeling a manual replacement `matched_import`. For a synced account, removing
+the final pending signal stops a separate opening-balance adjustment but retains
+the record as historical spending. The read-only MCP never changes records.
+Refresh live data after changes; old saved findings are historical.
+
+### Legacy Saved Audits (Optional)
+
+The older saved-audit/reporting pipeline keeps three kinds of evidence separate:
 
 1. **Lunch Money** supplies the selected account balance, imported and pending transactions, API-created placeholders, tags, recurring data, duplicate candidates, missed-recurring adjustments, and Fund Allocation reservations.
 2. **Capital One CSV exports** supply an independent posted-transaction ledger. An optional current ledger or available balance can be supplied with the import.
@@ -14,7 +88,7 @@ Forecast Magic does not connect directly to Plaid. Plaid troubleshooting is limi
 
 ## What An Audit Checks
 
-Each run stores an immutable snapshot for one compound account key, such as `plaid:123`. It reports:
+Each legacy REST `POST /runs` stores an immutable snapshot for one compound account key, such as `plaid:123`. These saved results remain available for existing reporting integrations; MCP `run_financial_health_audit` now returns live data instead. A saved snapshot reports:
 
 - Capital One versus Lunch Money balance comparison
 - Imported, native-pending, n8n-created, and tagged-placeholder transaction totals
@@ -34,7 +108,7 @@ Statuses are:
 - `healthy`: current bank evidence exists and no material issue is detected.
 - `attention`: the audit found warnings or an unexplained balance difference of at least `$1.00`.
 - `unreliable`: at least one critical finding is present.
-- `not_assessable`: current Capital One evidence is unavailable, so a complete independent reconciliation cannot be made.
+- `not_assessable`: current stored Capital One evidence is unavailable for this saved snapshot. This does not block model-led reconciliation with conversation attachments.
 
 The score is a diagnostic aid, not a bank balance and not a guarantee that the forecast is correct. The response also returns the facts, findings, and unknowns used to reach the result.
 
@@ -156,6 +230,8 @@ Authorization: Bearer <AUDIT_READ_TOKEN>
 
 Available tools:
 
+- `get_lunch_money_reference_data` (live, no prior audit)
+- `query_lunch_money_transactions` (live, no prior audit)
 - `run_financial_health_audit`
 - `get_latest_financial_health`
 - `compare_capital_one_and_lunch_money`
@@ -177,11 +253,37 @@ After at least one audit has run, `/api/reporting/daily-highlight` includes a co
 
 ## Recommended Routine
 
-1. Keep the `n8n_proc` pending-placeholder tag and evidence call in the Capital One and Venmo email workflows.
-2. Import a fresh Capital One CSV and current available balance when a full reconciliation is needed.
+1. Keep the `n8n_proc` pending-placeholder tag in the Capital One and Venmo email workflows.
+2. For conversational reconciliation, attach fresh Capital One evidence to the conversation and query live LM data. Importing evidence is optional and only needed for the legacy server-computed bank comparison.
 3. Run the audit.
 4. Review critical findings first, then warnings and unknowns.
 5. Resolve data issues in Lunch Money or Duplicate Review, then run a new audit.
 6. Retain prior runs as evidence of what was known at that time.
 
 The audit is deliberately advisory. Financial decisions should ultimately be checked against the bank's current ledger and available balance.
+# Verified Clearance Register
+
+Administrators can record that a retained transaction is verified posted without
+changing Lunch Money's system-defined `is_pending` field or its tags. This is an
+audit-only override, not a forecast adjustment or a duplicate resolution.
+
+- `GET /api/financial-audit/clearances?accountKey=plaid:123` reads the register.
+- `POST /api/financial-audit/clearances` requires an admin session and JSON containing
+  `accountKey`, `transactionId`, `confirmedPosted: true`, and `reason`.
+  The reason should identify bank evidence and confirm this is the only retained
+  representation of that bank transaction. No evidence upload is required.
+- `DELETE /api/financial-audit/clearances/:transactionId?accountKey=plaid:123` requires an
+  admin session and revokes the override. The record remains visible as revoked.
+- The read-only MCP tool `list_verified_clearances` lists entries; it cannot change them.
+
+Live audit reads return `effectiveStatus: "cleared"` and `auditClearance` for a
+valid active entry. Original flags remain in `raw`, `lmIsPending`, and the
+explanation's `originalSignals`. Do not describe these transactions as pending.
+Date, amount or source changes invalidate application of the override and set
+`clearanceNeedsReview`. Account and transaction ID must match exactly.
+
+New saved audit runs honor clearances and retain their evidence. Existing saved
+runs are historical snapshots and are not rewritten; use live reconciliation
+data or run a new audit for current status. Dashboard forecast calculations and
+LM records are unchanged. Register management currently uses the admin API,
+not a dashboard form. Read-only audit tokens cannot create or revoke entries.

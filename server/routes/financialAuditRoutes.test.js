@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createRequireBearerToken } from '../auth.js';
+import { createRequireBearerToken, requireAdmin } from '../auth.js';
 import { createFinancialAuditRouter } from './financialAuditRoutes.js';
 
 const pass = (request, response, next) => next();
@@ -29,6 +29,28 @@ const invokeGuard = (expectedToken, authorization) => {
 const routeFor = (router, path) => router.stack.find(layer => layer.route?.path === path).route;
 
 describe('Financial Audit API', () => {
+  it('restricts clearance writes to admin while allowing read-only register access', () => {
+    const router = createFinancialAuditRouter({}, {}, pass, pass, {});
+    const routes = router.stack.filter(layer => layer.route?.path.startsWith('/clearances')).map(layer => layer.route);
+    expect(routes.find(route => route.methods.get).stack[0].handle).toBe(pass);
+    expect(routes.find(route => route.methods.post).stack[0].handle).toBe(requireAdmin);
+    expect(routes.find(route => route.methods.delete).stack[0].handle).toBe(requireAdmin);
+    const response = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+    const next = vi.fn();
+    requireAdmin({ isAdmin: false, headers: { authorization: 'Bearer audit-read' } }, response, next);
+    expect(response.status).toHaveBeenCalledWith(401);
+    expect(next).not.toHaveBeenCalled();
+  });
+  it('serves live reconciliation data with read authorization and no upload', async () => {
+    const reader = { getTransactions: vi.fn(async () => ({ transactions: [] })) };
+    const router = createFinancialAuditRouter({}, { get: () => 'UTC' }, pass, pass, reader);
+    const route = routeFor(router, '/reconciliation-data');
+    expect(route.stack[0].handle).toBe(pass);
+    const json = vi.fn();
+    await route.stack.at(-1).handle({ query: { accountKey: 'plaid:1', startDate: '2026-10-01', endDate: '2026-10-10' } }, { json });
+    expect(reader.getTransactions).toHaveBeenCalledWith({ accountKey: 'plaid:1', startDate: '2026-10-01', endDate: '2026-10-10', paddingDays: 5, offset: 0, limit: 200 });
+    expect(json).toHaveBeenCalledWith({ transactions: [] });
+  });
   it('fails closed and accepts only the configured Bearer token', () => {
     expect(invokeGuard('', 'Bearer anything')).toMatchObject({
       status: 503,
