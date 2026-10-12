@@ -170,18 +170,33 @@ export const createFinancialAuditMcpServer = ({
   if (config.auditEngineEnabled) {
     server.registerTool('audit_run', {
       title: 'Run compact server-side financial audit',
-      description: 'Execute Forecast Magic server-side reconciliation and return a compact summary only. Stores full results by auditId; use audit_get_findings and audit_get_evidence for details. Does not return full transaction datasets.',
+      description: 'Execute Forecast Magic server-side reconciliation and return a compact summary only. If the user attached a Capital One CSV, pass it as capitalOneCsv once so its coverage becomes the audit bounds. Stores full results by auditId; use audit_get_findings and audit_get_evidence for details. Does not return full transaction datasets.',
       inputSchema: z.object({
         accountKey: accountSchema.shape.accountKey,
         anchorDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional()
           .describe('Audit date in YYYY-MM-DD. Defaults to today in the Forecast Magic timezone.'),
         findingLimit: z.number().int().min(0).max(25).optional()
           .describe('Maximum high-priority findings to include in the compact summary.'),
+        capitalOneCsv: z.string().optional()
+          .describe('Optional Capital One CSV text to import once for this audit. Its coverage dates become the audit bounds.'),
+        capitalOneFilename: z.string().optional(),
+        ledgerBalanceCents: z.number().int().optional()
+          .describe('Optional Capital One ledger balance from the export, in cents.'),
+        availableBalanceCents: z.number().int().optional()
+          .describe('Optional Capital One available balance, in cents.'),
       }),
       annotations: readOnlyAnnotations,
-    }, async ({ accountKey, anchorDate, findingLimit }) => {
+    }, async ({ accountKey, anchorDate, findingLimit, capitalOneCsv, capitalOneFilename, ledgerBalanceCents, availableBalanceCents }) => {
       const date = anchorDate || getDateInTimezone(new Date(), settings.get('timezone') || 'UTC');
-      return result(await service.runCompactAudit({ accountKey, anchorDate: date, findingLimit }));
+      return result(await service.runCompactAudit({
+        accountKey,
+        anchorDate: date,
+        findingLimit,
+        capitalOneCsv,
+        capitalOneFilename,
+        ledgerBalanceCents,
+        availableBalanceCents,
+      }));
     });
 
     server.registerTool('audit_get_findings', {

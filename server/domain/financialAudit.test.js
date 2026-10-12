@@ -138,11 +138,12 @@ describe('financial audit domain', () => {
       lunchMoneySyncedBalanceCents: 100000,
       capitalOneLedgerBalanceCents: 100000,
       capitalOneAvailableBalanceCents: 96500,
-      nativePendingCents: -1000,
+      nativePendingCents: 0,
+      ignoredNativePendingCents: -1000,
       taggedN8nPlaceholderCents: -2500,
       taggedManualPlaceholderCents: 0,
-      expectedAvailableCents: 96500,
-      unexplainedAvailableDifferenceCents: 0,
+      expectedAvailableCents: 97500,
+      unexplainedAvailableDifferenceCents: -1000,
     });
   });
 
@@ -161,17 +162,18 @@ describe('financial audit domain', () => {
     const transactions = [manual, n8n, settled, nativePending, refund, manualAccount];
 
     expect(buildBalanceBridge({ lunchMoneyBalanceCents: 1000000, transactions })).toMatchObject({
-      nativePendingCents: -2000,
+      nativePendingCents: 0,
+      ignoredNativePendingCents: -2000,
       taggedN8nPlaceholderCents: -5000,
       taggedManualPlaceholderCents: -204379,
-      expectedAvailableCents: 788621,
+      expectedAvailableCents: 790621,
     });
     expect(summarizeTransactionSources(transactions)).toMatchObject({
       taggedPendingPlaceholders: { count: 2, netCents: -5000 },
       taggedManualPlaceholders: { count: 1, netCents: -204379 },
     });
     expect(findStalePendingTransactions(transactions, '2026-09-15').map(t => t.transactionId))
-      .toEqual(['1', '2', '4', '5']);
+      .toEqual(['1', '2', '5']);
     expect(findTagComplianceIssues([settled])).toEqual({
       untaggedN8nCandidates: [], stalePendingCandidates: [],
     });
@@ -190,7 +192,7 @@ describe('financial audit domain', () => {
       n8nCreated: { count: 1, netCents: -300 },
     });
     expect(businessDaysBetween('2026-08-31', '2026-09-07')).toBe(5);
-    expect(findStalePendingTransactions(transactions, '2026-09-07', 3).map(item => item.transactionId)).toEqual(['2']);
+    expect(findStalePendingTransactions(transactions, '2026-09-07', 3).map(item => item.transactionId)).toEqual([]);
   });
 
   it('reports unknown source evidence separately from an unreliable result', () => {

@@ -32,6 +32,13 @@ statement/n8n ingestion, Duplicate Review, Financial Analytics, audit clearances
 and decimal-safe integer-cent arithmetic. Existing dashboard, reporting, REST,
 forecast, and legacy MCP contracts are unchanged.
 
+For compact audits, Capital One CSV coverage is the source of truth for the audit
+window. When a CSV is already stored, the server uses that export's first and
+last transaction dates as the audit bounds and queries Lunch Money with posting
+drift padding around those dates. When a user attaches a fresh Capital One CSV in
+the chat client, the model should pass that CSV text to `audit_run` as
+`capitalOneCsv` once, instead of paging through all Lunch Money records itself.
+
 ### Conversational Queries And Reconciliation (Default)
 
 The MCP server provides read-only access to live Lunch Money data. Evidence files
@@ -150,15 +157,14 @@ Forecast Magic does not connect directly to Plaid. Plaid troubleshooting is limi
 Each legacy REST `POST /runs` stores an immutable snapshot for one compound account key, such as `plaid:123`. These saved results remain available for existing reporting integrations; MCP `run_financial_health_audit` now returns live data instead. A saved snapshot reports:
 
 - Capital One versus Lunch Money balance comparison
-- Imported, native-pending, n8n-created, and tagged-placeholder transaction totals
+- Imported, n8n-created, and tagged-placeholder transaction totals
 - n8n-created transaction candidates missing `n8n_proc`
 - Suspicious use of pending-placeholder tags on non-placeholder transactions
 - Possible duplicates from the existing Duplicate Review rules
 - Capital One transactions missing from Lunch Money when the bank evidence is current and date-covered
 - Lunch Money transactions inside the Capital One export coverage that are not
-  matched to Capital One and are not known pending/native-placeholder charges
-- Native pending and tagged placeholders still open beyond the configured business-day thresholds
-- Amount, date, payee, or pending-state changes observed between audit snapshots
+  matched to Capital One and are not tagged as known pending/placeholders
+- Tagged placeholders still open beyond the configured business-day thresholds
 - n8n alert amounts that differ from a later settled Plaid transaction
 - Fund Allocation reservations and missed-recurring/opening adjustments
 - The remaining unexplained balance difference
@@ -312,12 +318,15 @@ Every tool is declared read-only and non-destructive. The connector cannot uploa
 Use the compact tools when the goal is to minimize model context while preserving
 full server-side processing:
 
-1. Call `audit_run` with `accountKey` and optional `anchorDate`. The server
-   processes all relevant local and Lunch Money inputs, stores a run, and returns
-   a compact summary with `auditId`, coverage, reconciliation status, counts,
-   financial totals, unexplained differences, confidence indicators, methodology
-   versions, response-size instrumentation, and only the highest-priority finding
-   headers.
+1. Call `audit_run` with `accountKey` and optional `anchorDate`. If a fresh
+   Capital One CSV is attached and not already imported, pass it as
+   `capitalOneCsv` with optional balances. The CSV's coverage dates become the
+   audit bounds. The server processes all relevant local and Lunch Money inputs,
+   stores a run, and returns a compact summary with `auditId`, coverage,
+   reconciliation status, counts, financial totals, CapOne-only records, LM-only
+   records, pending exclusions, balance assumptions, confidence indicators,
+   methodology versions, response-size instrumentation, and only the
+   highest-priority finding headers.
 2. Call `audit_get_findings` with `auditId` to retrieve filtered, paginated
    compact findings. Use `severity`, `category`, `offset`, and `limit` instead
    of asking for all findings at once.
@@ -330,6 +339,15 @@ silently dropped: the summary and finding pages include continuation metadata
 when more records exist. The initial summary is designed to stay below roughly
 3,000 tool-result tokens for typical audits; large evidence review should be
 performed through targeted `audit_get_evidence` calls.
+
+Compact audits intentionally do not report "changed since prior audit" findings.
+Manual and automation edits are expected operational behavior. Pending handling
+is tag-driven: explicit placeholder tags such as `n8n_proc`,
+`Forecast Magic Pending`, `n8n_pending`, and `LM Manual` are treated as known
+pending/placeholders. Lunch Money's native `is_pending` flag is preserved as
+provenance but is not by itself treated as a resolvable pending item or a balance
+adjustment, because Lunch Money does not give the user a direct way to clear that
+state.
 
 The compact workflow is controlled by:
 

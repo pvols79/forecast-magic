@@ -2,7 +2,7 @@ import { config } from '../config.js';
 import { AuditClearanceRepository } from '../repositories/auditClearanceRepository.js';
 import { applyAuditClearance } from '../domain/auditClearance.js';
 import {
-  assessAuditHealth, buildBalanceBridge, compareObservedTransactions,
+  assessAuditHealth, buildBalanceBridge,
   findStalePendingTransactions, findTagComplianceIssues, matchExternalTransactions,
   normalizeAuditTransaction, parseCapitalOneCsv, summarizeTransactionSources,
 } from '../domain/financialAudit.js';
@@ -35,16 +35,6 @@ const assertDate = date => {
 const finding = (key, severity, category, title, summary, evidence = {}) => ({
   key, severity, category, title, summary, status: 'open', evidence,
 });
-
-const ageHours = timestamp => timestamp
-  ? (Date.now() - new Date(timestamp).getTime()) / 3600000
-  : Number.POSITIVE_INFINITY;
-
-const statementIsFresh = (statement, anchorDate) => Boolean(
-  statement
-  && statement.coverageEnd >= addDays(anchorDate, -1)
-  && ageHours(statement.importedAt) <= config.auditStatementFreshHours
-);
 
 const publicTransaction = transaction => ({
   effectiveStatus: transaction.effectiveStatus,
@@ -102,8 +92,25 @@ const compactEvidenceRecord = value => {
     .map(([key, item]) => [key, compactEvidenceRecord(item)]));
 };
 
-const isKnownPendingCharge = transaction => transaction.effectiveStatus === 'pending'
-  && (transaction.pendingExplanation?.nativePending || transaction.pendingExplanation?.taggedPlaceholder);
+const sumCents = items => items.reduce((total, item) => total + item.amountCents, 0);
+
+const limitedRecords = (items, mapRecord, limit = 25) => ({
+  count: items.length,
+  totalCents: sumCents(items),
+  records: items.slice(0, limit).map(mapRecord),
+  hasMore: items.length > limit,
+  nextOffset: items.length > limit ? limit : null,
+});
+
+const compactStatementTransaction = transaction => ({
+  rowKey: transaction.rowKey,
+  date: transaction.date,
+  amountCents: transaction.amountCents,
+  description: transaction.description,
+  transactionType: transaction.transactionType,
+});
+
+const isKnownPendingCharge = transaction => Boolean(transaction.pendingExplanation?.taggedPlaceholder);
 
 const isCoveredByStatement = (transaction, statement) => statement
   && transaction.date >= statement.coverageStart
@@ -150,22 +157,30 @@ export class FinancialAuditService {
     this.duplicateReview = duplicateReview || new DuplicateReviewService(this.lunchMoney);
   }
 
-  async run(accountKey, anchorDate) {
+  async run(accountKey, anchorDate, options = {}) {
     assertAccountKey(accountKey);
     assertDate(anchorDate);
     const startedAt = new Date().toISOString();
-    const startDate = addDays(anchorDate, -89);
-    const previousRun = this.repository.getLatestRun(accountKey);
-    const previousTransactions = previousRun
-      ? new Map(this.repository.listRunTransactions(previousRun.id).map(item => [item.transactionId, item]))
-      : new Map();
+    if (options.capitalOneCsv) {
+      this.commitCapitalOneImport(accountKey, options.capitalOneCsv, {
+        filename: options.capitalOneFilename,
+        ledgerBalanceCents: options.ledgerBalanceCents,
+        availableBalanceCents: options.availableBalanceCents,
+        observedAt: options.observedAt || startedAt,
+      });
+    }
+    const latestStatement = this.repository.getLatestStatementImport(accountKey);
+    const startDate = latestStatement?.coverageStart || addDays(anchorDate, -89);
+    const endDate = latestStatement?.coverageEnd || anchorDate;
+    const queryStartDate = latestStatement ? addDays(startDate, -5) : startDate;
+    const queryEndDate = latestStatement ? addDays(endDate, 5) : endDate;
     const [manualAccounts, plaidAccounts, tags, rawTransactions, overview, duplicateSummary] = await Promise.all([
       this.lunchMoney.getManualAccounts(),
       this.lunchMoney.getPlaidAccounts(),
       this.lunchMoney.getTags(),
-      this.lunchMoney.getRawTransactions(startDate, anchorDate, { includeMetadata: true }),
-      this.analytics.getOverview(accountKey, anchorDate, { view: 'admin' }),
-      this.duplicateReview.getReportingSummary(accountKey, anchorDate),
+      this.lunchMoney.getRawTransactions(queryStartDate, queryEndDate, { includeMetadata: true }),
+      this.analytics.getOverview(accountKey, endDate, { view: 'admin' }),
+      this.duplicateReview.getReportingSummary(accountKey, endDate),
     ]);
     const account = [...manualAccounts, ...plaidAccounts].find(item => item.key === accountKey);
     if (!account) {
@@ -179,20 +194,18 @@ export class FinancialAuditService {
       .map(transaction => normalizeAuditTransaction(transaction, tagNamesById))
       .filter(transaction => transaction?.accountKey === accountKey)
       .map(transaction => applyAuditClearance(transaction, clearances));
-    const latestStatement = this.repository.getLatestStatementImport(accountKey);
     const statementTransactions = latestStatement
       ? this.repository.listStatementTransactions(latestStatement.id)
       : [];
-    const n8nEvidence = this.repository.listN8nEvidence(accountKey, startDate, anchorDate);
-    const freshStatement = statementIsFresh(latestStatement, anchorDate);
+    const n8nEvidence = this.repository.listN8nEvidence(accountKey, queryStartDate, queryEndDate);
+    const freshStatement = Boolean(latestStatement);
     const externalMatch = latestStatement
       ? matchExternalTransactions(statementTransactions, transactions)
       : { links: [], unmatchedExternal: [], unmatchedLunchMoney: [] };
     const compliance = findTagComplianceIssues(transactions);
     const stalePending = findStalePendingTransactions(
-      transactions, anchorDate, config.auditPendingWarningBusinessDays
+      transactions, endDate, config.auditPendingWarningBusinessDays
     );
-    const observedChanges = compareObservedTransactions(previousTransactions, transactions);
     const lifecycleChanges = lifecycleCandidates(
       n8nEvidence,
       transactions.filter(transaction => transaction.source === 'plaid' && !transaction.isPending)
@@ -216,13 +229,6 @@ export class FinancialAuditService {
         'capital-one-evidence-missing', 'unknown', 'source_freshness',
         'Capital One evidence is unavailable',
         'This saved snapshot has no stored bank evidence. For a model-led reconciliation, query live LM data and compare with Capital One evidence attached in the conversation; no upload is required.'
-      ));
-    } else if (!freshStatement) {
-      findings.push(finding(
-        'capital-one-evidence-stale', 'unknown', 'source_freshness',
-        'Capital One evidence is too old for a missing-transaction audit',
-        `The latest import covers ${latestStatement.coverageStart} through ${latestStatement.coverageEnd}.`,
-        { statement: latestStatement }
       ));
     }
     if (freshStatement) {
@@ -277,14 +283,6 @@ export class FinancialAuditService {
         { ...change, transaction: publicTransaction(change.transaction) }
       ));
     }
-    for (const change of observedChanges) {
-      findings.push(finding(
-        `observed-change-${change.transactionId}`, 'warning', 'transaction_integrity',
-        'Lunch Money transaction changed since the prior audit',
-        `Transaction ${change.transactionId} changed after the previous audit.`,
-        change
-      ));
-    }
     for (const candidate of duplicateSummary.candidates) {
       findings.push(finding(
         `duplicate-${candidate.id}`, candidate.confidence === 'high' ? 'critical' : 'warning', 'duplicate',
@@ -309,7 +307,8 @@ export class FinancialAuditService {
         importedAt: latestStatement.importedAt,
         coverageStart: latestStatement.coverageStart,
         coverageEnd: latestStatement.coverageEnd,
-        freshEnoughForMissingAudit: freshStatement,
+        usedAsAuditBounds: true,
+        freshEnoughForMissingAudit: true,
       } : null,
       n8n: { latestEvidenceAt: this.repository.latestN8nEvidenceTimestamp(accountKey) },
     };
@@ -319,13 +318,41 @@ export class FinancialAuditService {
       balanceDifferenceCents: bridge.unexplainedAvailableDifferenceCents,
     });
     const transactionSources = summarizeTransactionSources(transactions);
+    const coveredLunchMoneyOnly = freshStatement
+      ? externalMatch.unmatchedLunchMoney.filter(item => isCoveredByStatement(item, latestStatement))
+      : [];
+    const knownPendingExcludedFromLmOnly = coveredLunchMoneyOnly.filter(isKnownPendingCharge);
+    const actionableLunchMoneyOnly = coveredLunchMoneyOnly.filter(item => !isKnownPendingCharge(item));
+    const reconciliationSections = {
+      capitalOneOnly: limitedRecords(externalMatch.unmatchedExternal, compactStatementTransaction),
+      lunchMoneyOnly: limitedRecords(actionableLunchMoneyOnly, publicTransaction),
+      knownPendingExcludedFromLunchMoneyOnly: limitedRecords(knownPendingExcludedFromLmOnly, publicTransaction),
+    };
+    const pendingImpactCents = bridge.taggedN8nPlaceholderCents + bridge.taggedManualPlaceholderCents;
+    const balanceAssumption = {
+      lunchMoneySyncedBalanceCents: bridge.lunchMoneySyncedBalanceCents,
+      capitalOneLedgerBalanceCents: bridge.capitalOneLedgerBalanceCents,
+      capitalOneAvailableBalanceCents: bridge.capitalOneAvailableBalanceCents,
+      taggedPendingImpactCents: pendingImpactCents,
+      ignoredNativePendingCents: bridge.ignoredNativePendingCents,
+      expectedAvailableBalanceCents: bridge.expectedAvailableCents,
+      unexplainedAvailableDifferenceCents: bridge.unexplainedAvailableDifferenceCents,
+      explanation: bridge.unexplainedAvailableDifferenceCents == null
+        ? 'No Capital One available balance was supplied, so the audit cannot prove whether the balance difference is fully explained by tagged pending placeholders.'
+        : Math.abs(bridge.unexplainedAvailableDifferenceCents) < 100
+          ? 'The supplied Capital One available balance is explained by tagged pending placeholders. Lunch Money native pending flags are ignored for this audit because they may not be user-resolvable.'
+          : 'Tagged pending placeholders do not fully explain the supplied Capital One available balance difference; review CapOne-only and LM-only sections.',
+    };
     const summary = {
       health,
       facts: {
         account: { key: account.key, name: account.name, source: account.source },
-        auditWindow: { startDate, endDate: anchorDate },
+        auditWindow: { startDate, endDate, source: latestStatement ? 'capital_one_csv_coverage' : 'default_90_day_window' },
+        lunchMoneyQueryWindow: { startDate: queryStartDate, endDate: queryEndDate },
         transactionSources,
         balanceBridge: bridge,
+        balanceAssumption,
+        reconciliationSections,
         tagCompliance: {
           untaggedN8nCandidateCount: compliance.untaggedN8nCandidates.length,
           suspiciousPendingTagCount: compliance.stalePendingCandidates.length,
@@ -333,13 +360,10 @@ export class FinancialAuditService {
         transactionIntegrity: {
           possibleDuplicateCount: duplicateSummary.needsReview,
           missingFromLunchMoneyCount: freshStatement ? externalMatch.unmatchedExternal.length : null,
-          extraLunchMoneyCount: freshStatement
-            ? externalMatch.unmatchedLunchMoney
-              .filter(item => isCoveredByStatement(item, latestStatement) && !isKnownPendingCharge(item)).length
-            : null,
+          extraLunchMoneyCount: freshStatement ? actionableLunchMoneyOnly.length : null,
+          knownPendingExcludedFromExtraCount: freshStatement ? knownPendingExcludedFromLmOnly.length : null,
           stalePendingCount: stalePending.length,
           settlementChangeCount: lifecycleChanges.length,
-          observedChangeCount: observedChanges.length,
         },
         spendablePosition: overview.openingReconciliation,
         fundReservations: overview.funds,
@@ -447,8 +471,10 @@ export class FinancialAuditService {
       transactionCounts: run.summary.facts.transactionSources,
       financialTotals: {
         balanceBridge: run.summary.facts.balanceBridge,
+        balanceAssumption: run.summary.facts.balanceAssumption,
         spendablePosition: run.summary.facts.spendablePosition,
       },
+      reconciliationSections: run.summary.facts.reconciliationSections,
       unexplainedDifferences: {
         availableBalanceCents: run.summary.facts.balanceBridge.unexplainedAvailableDifferenceCents,
       },
@@ -490,8 +516,21 @@ export class FinancialAuditService {
     };
   }
 
-  async runCompactAudit({ accountKey, anchorDate, findingLimit = 10 }) {
-    const run = await this.run(accountKey, anchorDate);
+  async runCompactAudit({
+    accountKey,
+    anchorDate,
+    findingLimit = 10,
+    capitalOneCsv,
+    capitalOneFilename,
+    ledgerBalanceCents,
+    availableBalanceCents,
+  }) {
+    const run = await this.run(accountKey, anchorDate, {
+      capitalOneCsv,
+      capitalOneFilename,
+      ledgerBalanceCents,
+      availableBalanceCents,
+    });
     return this.compactRunSummary(run, { findingLimit });
   }
 

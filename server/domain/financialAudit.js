@@ -227,19 +227,20 @@ export const summarizeTransactionSources = transactions => {
 };
 
 export const buildBalanceBridge = ({ lunchMoneyBalanceCents, capitalOneLedgerCents, capitalOneAvailableCents, transactions }) => {
-  const nativePending = transactions.filter(transaction => transaction.source === 'plaid' && transaction.isPending && balanceTreatmentFor(transaction) === 'unreflected');
   const placeholders = transactions.filter(isPlaceholder);
-  const nativePendingCents = nativePending.reduce((total, transaction) => total + transaction.amountCents, 0);
+  const nativePending = transactions.filter(transaction => transaction.source === 'plaid' && transaction.isPending);
+  const ignoredNativePendingCents = nativePending.reduce((total, transaction) => total + transaction.amountCents, 0);
   const placeholderCents = placeholders.filter(transaction => transaction.source === 'api')
     .reduce((total, transaction) => total + transaction.amountCents, 0);
   const manualPlaceholderCents = placeholders.filter(transaction => transaction.source === 'manual')
     .reduce((total, transaction) => total + transaction.amountCents, 0);
-  const expectedAvailableCents = lunchMoneyBalanceCents + nativePendingCents + placeholderCents + manualPlaceholderCents;
+  const expectedAvailableCents = lunchMoneyBalanceCents + placeholderCents + manualPlaceholderCents;
   return {
     lunchMoneySyncedBalanceCents: lunchMoneyBalanceCents,
     capitalOneLedgerBalanceCents: capitalOneLedgerCents ?? null,
     capitalOneAvailableBalanceCents: capitalOneAvailableCents ?? null,
-    nativePendingCents,
+    nativePendingCents: 0,
+    ignoredNativePendingCents,
     taggedN8nPlaceholderCents: placeholderCents,
     taggedManualPlaceholderCents: manualPlaceholderCents,
     expectedAvailableCents,
@@ -255,20 +256,10 @@ export const findTagComplianceIssues = transactions => ({
 });
 
 export const findStalePendingTransactions = (transactions, anchorDate, warningDays = 3) => transactions
-  .filter(transaction => (transaction.isPending && balanceTreatmentFor(transaction) === 'unreflected') || isPlaceholder(transaction))
+  .filter(transaction => isPlaceholder(transaction))
   .map(transaction => ({ ...transaction, businessDaysOpen: businessDaysBetween(transaction.date, anchorDate) }))
   .filter(transaction => transaction.businessDaysOpen > warningDays)
   .sort((left, right) => right.businessDaysOpen - left.businessDaysOpen);
-
-export const compareObservedTransactions = (previousById, current) => current.flatMap(transaction => {
-  const previous = previousById.get(transaction.transactionId);
-  if (!previous || previous.fingerprint === transaction.fingerprint) return [];
-  const changes = {};
-  for (const field of ['date', 'amountCents', 'payee', 'originalPayee', 'isPending']) {
-    if (previous[field] !== transaction[field]) changes[field] = { from: previous[field], to: transaction[field] };
-  }
-  return Object.keys(changes).length ? [{ transactionId: transaction.transactionId, changes }] : [];
-});
 
 export const assessAuditHealth = ({ findings, hasFreshStatementEvidence, balanceDifferenceCents }) => {
   const critical = findings.filter(finding => finding.severity === 'critical').length;

@@ -117,10 +117,19 @@ describe('FinancialAuditService', () => {
 
     expect(result.summary.facts.balanceBridge).toMatchObject({
       lunchMoneySyncedBalanceCents: 100000,
-      nativePendingCents: -1000,
+      nativePendingCents: 0,
+      ignoredNativePendingCents: -1000,
       taggedN8nPlaceholderCents: -2500,
-      expectedAvailableCents: 96500,
-      unexplainedAvailableDifferenceCents: 0,
+      expectedAvailableCents: 97500,
+      unexplainedAvailableDifferenceCents: -1000,
+    });
+    expect(result.summary.facts.balanceAssumption).toMatchObject({
+      lunchMoneySyncedBalanceCents: 100000,
+      capitalOneAvailableBalanceCents: 96500,
+      taggedPendingImpactCents: -2500,
+      ignoredNativePendingCents: -1000,
+      expectedAvailableBalanceCents: 97500,
+      unexplainedAvailableDifferenceCents: -1000,
     });
     expect(result.summary.facts.spendablePosition).toMatchObject({
       syncedAccountBalanceCents: 100000,
@@ -136,10 +145,22 @@ describe('FinancialAuditService', () => {
     });
     expect(result.summary.facts.transactionIntegrity).toMatchObject({
       missingFromLunchMoneyCount: 0,
-      extraLunchMoneyCount: 1,
+      extraLunchMoneyCount: 2,
+      knownPendingExcludedFromExtraCount: 1,
+    });
+    expect(result.summary.facts.auditWindow).toEqual({
+      startDate: '2026-09-05',
+      endDate: '2026-09-05',
+      source: 'capital_one_csv_coverage',
+    });
+    expect(result.summary.facts.reconciliationSections).toMatchObject({
+      capitalOneOnly: { count: 0, totalCents: 0 },
+      lunchMoneyOnly: { count: 2, totalCents: -1500 },
+      knownPendingExcludedFromLunchMoneyOnly: { count: 1, totalCents: -2500 },
     });
     expect(result.findings).toEqual(expect.arrayContaining([
       expect.objectContaining({ key: 'untagged-n8n-13', category: 'tag_compliance' }),
+      expect.objectContaining({ key: 'extra-lunch-money-11', category: 'extra_lunch_money' }),
       expect.objectContaining({ key: 'extra-lunch-money-13', category: 'extra_lunch_money' }),
     ]));
   });
