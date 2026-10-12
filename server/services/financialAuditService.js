@@ -13,6 +13,9 @@ import { DuplicateReviewService } from './duplicateReviewService.js';
 import { FinancialAnalyticsService } from './financialAnalyticsService.js';
 import { LunchMoneyService } from './lunchMoneyService.js';
 
+const AUDIT_ENGINE_METHODOLOGY_VERSION = 'server-audit-v1';
+const MATCHING_METHODOLOGY_VERSION = 'financial-audit-matching-v1';
+
 const assertAccountKey = accountKey => {
   if (!/^(manual|plaid):[^:]+$/.test(accountKey || '')) {
     const error = new Error('A compound account key such as plaid:123 is required.');
@@ -63,6 +66,57 @@ const publicTransaction = transaction => ({
   hasPendingTag: transaction.hasPendingTag,
   pendingExplanation: transaction.pendingExplanation,
 });
+
+const estimateTokens = value => Math.ceil(JSON.stringify(value).length / 4);
+
+const compactFinding = finding => ({
+  key: finding.key,
+  severity: finding.severity,
+  category: finding.category,
+  title: finding.title,
+  summary: finding.summary,
+  status: finding.status,
+  evidenceAvailable: Boolean(finding.evidence && Object.keys(finding.evidence).length),
+});
+
+const compactEvidenceRecord = value => {
+  if (Array.isArray(value)) return value.map(compactEvidenceRecord);
+  if (!value || typeof value !== 'object') return value;
+  if (value.transactionId || value.rowKey) {
+    return {
+      transactionId: value.transactionId,
+      rowKey: value.rowKey,
+      source: value.source,
+      date: value.date,
+      amountCents: value.amountCents,
+      payee: value.payee,
+      description: value.description,
+      originalPayee: value.originalPayee,
+      effectiveStatus: value.effectiveStatus,
+      isPending: value.isPending,
+      balanceTreatment: value.balanceTreatment,
+    };
+  }
+  return Object.fromEntries(Object.entries(value)
+    .filter(([key]) => !['raw', 'notes', 'payload'].includes(key))
+    .map(([key, item]) => [key, compactEvidenceRecord(item)]));
+};
+
+const isKnownPendingCharge = transaction => transaction.effectiveStatus === 'pending'
+  && (transaction.pendingExplanation?.nativePending || transaction.pendingExplanation?.taggedPlaceholder);
+
+const isCoveredByStatement = (transaction, statement) => statement
+  && transaction.date >= statement.coverageStart
+  && transaction.date <= statement.coverageEnd;
+
+const assertPagination = ({ offset = 0, limit = 25, maxLimit = 100 } = {}) => {
+  if (!Number.isInteger(offset) || offset < 0 || !Number.isInteger(limit) || limit < 1 || limit > maxLimit) {
+    const error = new Error(`offset must be nonnegative and limit must be 1-${maxLimit}.`);
+    error.status = 400;
+    throw error;
+  }
+  return { offset, limit };
+};
 
 const lifecycleCandidates = (evidence, transactions) => evidence.flatMap(item => {
   const candidates = transactions.map(transaction => ({
@@ -180,6 +234,15 @@ export class FinancialAuditService {
           { capitalOneTransaction: transaction }
         ));
       }
+      for (const transaction of externalMatch.unmatchedLunchMoney
+        .filter(item => isCoveredByStatement(item, latestStatement) && !isKnownPendingCharge(item))) {
+        findings.push(finding(
+          `extra-lunch-money-${transaction.transactionId}`, 'warning', 'extra_lunch_money',
+          'Lunch Money transaction is not in the Capital One export',
+          `${transaction.payee} on ${transaction.date} is present in Lunch Money but has no matching row in the fresh Capital One export and is not classified as a known pending placeholder.`,
+          { lunchMoneyTransaction: publicTransaction(transaction), statement: latestStatement }
+        ));
+      }
     }
     for (const link of externalMatch.links.filter(item => item.payeeSimilarity < 0.35)) {
       findings.push(finding(
@@ -270,6 +333,10 @@ export class FinancialAuditService {
         transactionIntegrity: {
           possibleDuplicateCount: duplicateSummary.needsReview,
           missingFromLunchMoneyCount: freshStatement ? externalMatch.unmatchedExternal.length : null,
+          extraLunchMoneyCount: freshStatement
+            ? externalMatch.unmatchedLunchMoney
+              .filter(item => isCoveredByStatement(item, latestStatement) && !isKnownPendingCharge(item)).length
+            : null,
           stalePendingCount: stalePending.length,
           settlementChangeCount: lifecycleChanges.length,
           observedChangeCount: observedChanges.length,
@@ -278,6 +345,10 @@ export class FinancialAuditService {
         fundReservations: overview.funds,
       },
       unknowns: findings.filter(item => item.severity === 'unknown').map(item => item.summary),
+      methodology: {
+        calculationVersion: AUDIT_ENGINE_METHODOLOGY_VERSION,
+        matchingVersion: MATCHING_METHODOLOGY_VERSION,
+      },
     };
     const completedAt = new Date().toISOString();
     const runId = this.repository.saveRun({
@@ -361,6 +432,121 @@ export class FinancialAuditService {
   getFindings(accountKey, filters = {}) {
     const run = this.getLatest(accountKey);
     return this.repository.listFindings(run.id, filters);
+  }
+
+  compactRunSummary(run, { findingLimit = 10 } = {}) {
+    const findings = this.repository.listFindings(run.id, { limit: findingLimit });
+    const totalFindings = this.repository.countFindings(run.id);
+    const summary = {
+      auditId: run.id,
+      account: run.summary.facts.account,
+      dateRange: run.summary.facts.auditWindow,
+      dataCoverage: run.sourceFreshness,
+      completeness: run.status === 'not_assessable' ? 'incomplete' : 'server_processed',
+      reconciliationStatus: run.status,
+      transactionCounts: run.summary.facts.transactionSources,
+      financialTotals: {
+        balanceBridge: run.summary.facts.balanceBridge,
+        spendablePosition: run.summary.facts.spendablePosition,
+      },
+      unexplainedDifferences: {
+        availableBalanceCents: run.summary.facts.balanceBridge.unexplainedAvailableDifferenceCents,
+      },
+      findingCounts: {
+        critical: run.summary.health.critical,
+        warning: run.summary.health.warnings,
+        unknown: run.summary.health.unknowns,
+        total: totalFindings,
+      },
+      highPriorityFindings: findings.map(compactFinding),
+      confidence: {
+        score: run.confidenceScore,
+        status: run.status,
+        evidenceIndicators: {
+          freshCapitalOneEvidence: Boolean(run.sourceFreshness.capitalOne?.freshEnoughForMissingAudit),
+          lunchMoneyFetchedAt: run.sourceFreshness.lunchMoney?.fetchedAt,
+          n8nLatestEvidenceAt: run.sourceFreshness.n8n?.latestEvidenceAt,
+        },
+      },
+      methodology: run.summary.methodology || {
+        calculationVersion: AUDIT_ENGINE_METHODOLOGY_VERSION,
+        matchingVersion: MATCHING_METHODOLOGY_VERSION,
+      },
+      retrieval: {
+        findingsTool: 'audit_get_findings',
+        evidenceTool: 'audit_get_evidence',
+        findingOffset: findings.length,
+        findingLimit,
+        hasMoreFindings: totalFindings > findings.length,
+      },
+    };
+    return {
+      ...summary,
+      responseSize: {
+        estimatedTokens: estimateTokens(summary),
+        includedFindings: findings.length,
+        totalFindings,
+      },
+    };
+  }
+
+  async runCompactAudit({ accountKey, anchorDate, findingLimit = 10 }) {
+    const run = await this.run(accountKey, anchorDate);
+    return this.compactRunSummary(run, { findingLimit });
+  }
+
+  getAuditFindings({ auditId, accountKey, severity, category, offset = 0, limit = 25 }) {
+    const page = assertPagination({ offset, limit });
+    const run = this.getRun(auditId);
+    if (accountKey && run.accountKey !== accountKey) {
+      const error = new Error('Audit run does not belong to the requested account.');
+      error.status = 404;
+      throw error;
+    }
+    const filters = { severity, category };
+    const findings = this.repository.listFindings(run.id, { ...filters, ...page });
+    const total = this.repository.countFindings(run.id, filters);
+    const result = {
+      auditId: run.id,
+      accountKey: run.accountKey,
+      filters,
+      pagination: {
+        offset,
+        limit,
+        returned: findings.length,
+        total,
+        nextOffset: offset + findings.length < total ? offset + findings.length : null,
+        hasMore: offset + findings.length < total,
+      },
+      findings: findings.map(compactFinding),
+    };
+    return { ...result, responseSize: { estimatedTokens: estimateTokens(result) } };
+  }
+
+  getAuditEvidence({ auditId, accountKey, findingKey }) {
+    const run = this.getRun(auditId);
+    if (accountKey && run.accountKey !== accountKey) {
+      const error = new Error('Audit run does not belong to the requested account.');
+      error.status = 404;
+      throw error;
+    }
+    const finding = this.repository.getFinding(run.id, findingKey);
+    if (!finding) {
+      const error = new Error('Audit finding was not found.');
+      error.status = 404;
+      throw error;
+    }
+    const result = {
+      auditId: run.id,
+      accountKey: run.accountKey,
+      finding: compactFinding(finding),
+      evidence: compactEvidenceRecord(finding.evidence),
+      methodology: run.summary.methodology || {
+        calculationVersion: AUDIT_ENGINE_METHODOLOGY_VERSION,
+        matchingVersion: MATCHING_METHODOLOGY_VERSION,
+      },
+    };
+    return { ...result, responseSize: { estimatedTokens: estimateTokens(result) } };
   }
 
   getTransactions(accountKey, filters = {}) {

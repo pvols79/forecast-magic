@@ -15,6 +15,7 @@ export const config = {
   auditPendingWarningBusinessDays: Number(process.env.AUDIT_PENDING_WARNING_BUSINESS_DAYS || 3),
   auditPendingCriticalBusinessDays: Number(process.env.AUDIT_PENDING_CRITICAL_BUSINESS_DAYS || 5),
   auditStatementFreshHours: Number(process.env.AUDIT_STATEMENT_FRESH_HOURS || 36),
+  auditEngineEnabled: process.env.AUDIT_ENGINE_ENABLED !== 'false',
   lunchMoneyApiKey: process.env.LUNCH_MONEY_API_KEY || '',
   lunchMoneyBaseUrl: process.env.LUNCH_MONEY_API_BASE_URL || 'https://api.lunchmoney.dev/v2',
   isProduction: process.env.NODE_ENV === 'production',

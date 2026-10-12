@@ -109,7 +109,7 @@ export class FinancialAuditRepository {
     return hydrateRun(getDatabase().prepare('SELECT * FROM audit_runs WHERE id = ?').get(runId));
   }
 
-  listFindings(runId, { severity, category } = {}) {
+  listFindings(runId, { severity, category, offset = 0, limit } = {}) {
     const clauses = ['run_id = ?'];
     const values = [runId];
     if (severity) {
@@ -120,11 +120,33 @@ export class FinancialAuditRepository {
       clauses.push('category = ?');
       values.push(category);
     }
+    const pagination = [];
+    if (limit != null) {
+      pagination.push('LIMIT ? OFFSET ?');
+      values.push(limit, offset);
+    }
     return getDatabase().prepare(`
       SELECT * FROM audit_findings
       WHERE ${clauses.join(' AND ')}
       ORDER BY CASE severity WHEN 'critical' THEN 0 WHEN 'warning' THEN 1 ELSE 2 END, id
+      ${pagination.join(' ')}
     `).all(...values).map(hydrateFinding);
+  }
+
+  countFindings(runId, { severity, category } = {}) {
+    const clauses = ['run_id = ?'];
+    const values = [runId];
+    if (severity) {
+      clauses.push('severity = ?');
+      values.push(severity);
+    }
+    if (category) {
+      clauses.push('category = ?');
+      values.push(category);
+    }
+    return Number(getDatabase().prepare(`
+      SELECT COUNT(*) AS count FROM audit_findings WHERE ${clauses.join(' AND ')}
+    `).get(...values).count);
   }
 
   getFinding(runId, findingKey) {

@@ -134,8 +134,13 @@ describe('FinancialAuditService', () => {
       n8nCreated: { count: 2, netCents: -3000 },
       taggedPendingPlaceholders: { count: 1, netCents: -2500 },
     });
+    expect(result.summary.facts.transactionIntegrity).toMatchObject({
+      missingFromLunchMoneyCount: 0,
+      extraLunchMoneyCount: 1,
+    });
     expect(result.findings).toEqual(expect.arrayContaining([
       expect.objectContaining({ key: 'untagged-n8n-13', category: 'tag_compliance' }),
+      expect.objectContaining({ key: 'extra-lunch-money-13', category: 'extra_lunch_money' }),
     ]));
   });
 
@@ -144,6 +149,7 @@ describe('FinancialAuditService', () => {
 
     expect(result.status).toBe('not_assessable');
     expect(result.summary.facts.transactionIntegrity.missingFromLunchMoneyCount).toBeNull();
+    expect(result.summary.facts.transactionIntegrity.extraLunchMoneyCount).toBeNull();
     expect(result.findings.some(item => item.category === 'missing_import')).toBe(false);
     expect(result.findings).toEqual(expect.arrayContaining([
       expect.objectContaining({ key: 'capital-one-evidence-missing', severity: 'unknown' }),
@@ -170,6 +176,51 @@ describe('FinancialAuditService', () => {
       evidence: { amountDifferenceCents: -500 },
     });
     expect(settlement.evidence.transaction).toMatchObject({ source: 'plaid', amountCents: -4000 });
+  });
+
+  it('returns compact server-side audit summaries with paginated findings and evidence', async () => {
+    const service = createService();
+    const summary = await service.runCompactAudit({
+      accountKey: 'plaid:1',
+      anchorDate: '2026-09-06',
+      findingLimit: 1,
+    });
+
+    expect(summary).toMatchObject({
+      auditId: expect.any(Number),
+      account: { key: 'plaid:1' },
+      reconciliationStatus: 'not_assessable',
+      retrieval: {
+        findingsTool: 'audit_get_findings',
+        evidenceTool: 'audit_get_evidence',
+        hasMoreFindings: true,
+      },
+      responseSize: { estimatedTokens: expect.any(Number) },
+    });
+    expect(summary.highPriorityFindings).toHaveLength(1);
+    expect(summary.highPriorityFindings[0].evidence).toBeUndefined();
+
+    const findings = service.getAuditFindings({
+      auditId: summary.auditId,
+      accountKey: 'plaid:1',
+      offset: 0,
+      limit: 1,
+    });
+    expect(findings.pagination).toMatchObject({ returned: 1, hasMore: true });
+    expect(findings.findings[0].evidence).toBeUndefined();
+
+    const evidence = service.getAuditEvidence({
+      auditId: summary.auditId,
+      accountKey: 'plaid:1',
+      findingKey: 'untagged-n8n-13',
+    });
+    expect(evidence.finding).toMatchObject({ key: 'untagged-n8n-13' });
+    expect(evidence.evidence.transaction).toMatchObject({
+      transactionId: '13',
+      source: 'api',
+      amountCents: -500,
+    });
+    expect(evidence.evidence.transaction.notes).toBeUndefined();
   });
 
 });

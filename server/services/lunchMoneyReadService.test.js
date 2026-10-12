@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { LunchMoneyReadService } from './lunchMoneyReadService.js';
+import { LunchMoneyReadService, reconciliationGuidance } from './lunchMoneyReadService.js';
 
 const setup = () => {
   const lunchMoney = {
@@ -18,6 +18,18 @@ const setup = () => {
 const query = { accountKey: 'plaid:1', startDate: '2026-10-01', endDate: '2026-10-10', paddingDays: 5 };
 
 describe('Live Lunch Money audit reads', () => {
+  it('provides the audit requirements in reference and transaction responses', async () => {
+    const { service } = setup();
+    expect((await service.getReferenceData()).guidance).toEqual(reconciliationGuidance);
+    expect((await service.getTransactions(query)).guidance).toEqual(reconciliationGuidance);
+    for (const key of ['auditScope', 'coverage', 'reconciliationLedger',
+      'discrepancyEvidence', 'balanceArithmetic', 'auditConclusion']) {
+      expect(reconciliationGuidance[key]).toBeTruthy();
+    }
+    expect(reconciliationGuidance.auditScope).toContain('unless separately requested');
+    expect(reconciliationGuidance.auditConclusion).toContain('complete, incomplete, or inconclusive');
+    expect(reconciliationGuidance.balanceArithmetic).toContain('does not prove');
+  });
   it('returns effective cleared status without changing raw LM flags', async () => {
     const { service, lunchMoney } = setup();
     lunchMoney.getAllRawTransactions.mockResolvedValue([
