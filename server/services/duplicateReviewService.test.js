@@ -208,6 +208,42 @@ describe('DuplicateReviewService', () => {
       shouldCreate: false,
       duplicateRisk: true,
     });
-    expect(result.amountDateMatches).toHaveLength(2);
+    expect(result.amountDateMatches).toHaveLength(1);
   });
+  it.each([
+    ['DUTCH BROS', 'VENMO', true],
+    ['DUTCH BROS', 'Dutch Bros Coffee', false],
+    ['Aaron Williams', 'Eden Williams', true],
+    ['VENMO', 'VENMO', true],
+    ['Sarah Kopacko', 'Sarah Kopacko', false],
+    ['', '', true],
+  ])('preflight allows uncertain or unrelated payees: %s / %s', async (payee, existingPayee, shouldCreate) => {
+    const { service } = setup();
+    const lunchMoney = service.lunchMoney;
+    lunchMoney.getRawTransactions.mockResolvedValue([
+      raw({ payee: existingPayee, amount: '40', source: 'plaid' }),
+    ]);
+    const result = await service.preflight({ accountKey: 'plaid:1', date: '2026-08-14', amount: 40, payee });
+    expect(result.shouldCreate).toBe(shouldCreate);
+    expect(result.amountDateMatches).toHaveLength(shouldCreate ? 0 : 1);
+  });
+
+  it('blocks a replay of the exact email even if its payee changed', async () => {
+    const { service } = setup();
+    const lunchMoney = service.lunchMoney;
+    lunchMoney.getRawTransactions.mockResolvedValue([raw({ external_id: 'email-1' })]);
+    expect(await service.preflight({ accountKey: 'plaid:1', date: '2026-08-14', amount: 40,
+      payee: 'Other', externalId: 'email-1' })).toMatchObject({ shouldCreate: false, reason: 'exact_external_id' });
+  });
+
+  it('scans an explicit audit period rather than the UI default 30 days', async () => {
+    const { service } = setup();
+    const lunchMoney = service.lunchMoney;
+    const result = await service.getReportingSummary('plaid:1', '2026-10-16', {
+      startDate: '2025-12-27', endDate: '2026-10-21',
+    });
+    expect(lunchMoney.getRawTransactions).toHaveBeenCalledWith('2025-12-27', '2026-10-21', { includeMetadata: true });
+    expect(result.window).toEqual({ startDate: '2025-12-27', endDate: '2026-10-21' });
+  });
+
 });

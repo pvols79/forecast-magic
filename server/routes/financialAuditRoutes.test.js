@@ -29,12 +29,13 @@ const invokeGuard = (expectedToken, authorization) => {
 const routeFor = (router, path) => router.stack.find(layer => layer.route?.path === path).route;
 
 describe('Financial Audit API', () => {
-  it('restricts clearance writes to admin while allowing read-only register access', () => {
-    const router = createFinancialAuditRouter({}, {}, pass, pass, {});
+  it('restricts clearance writes to the write guard while allowing read-only register access', () => {
+    const writeGuard = vi.fn();
+    const router = createFinancialAuditRouter({}, {}, pass, writeGuard, {});
     const routes = router.stack.filter(layer => layer.route?.path.startsWith('/clearances')).map(layer => layer.route);
     expect(routes.find(route => route.methods.get).stack[0].handle).toBe(pass);
-    expect(routes.find(route => route.methods.post).stack[0].handle).toBe(requireAdmin);
-    expect(routes.find(route => route.methods.delete).stack[0].handle).toBe(requireAdmin);
+    expect(routes.find(route => route.methods.post).stack[0].handle).toBe(writeGuard);
+    expect(routes.find(route => route.methods.delete).stack[0].handle).toBe(writeGuard);
     const response = { status: vi.fn().mockReturnThis(), json: vi.fn() };
     const next = vi.fn();
     requireAdmin({ isAdmin: false, headers: { authorization: 'Bearer audit-read' } }, response, next);

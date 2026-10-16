@@ -1,7 +1,7 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
-import { afterEach, describe, expect, it } from 'vitest';
-import { createFinancialAuditMcpServer } from './financialAuditMcp.js';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { createFinancialAuditMcpServer, createFinancialAuditWriteMcpServer } from './financialAuditMcp.js';
 import { reconciliationGuidance } from '../services/lunchMoneyReadService.js';
 
 const connections = [];
@@ -119,4 +119,32 @@ describe('Forecast Magic audit MCP server', () => {
       responseSize: { estimatedTokens: 120 },
     });
   });
+  it('isolates explicit clearance mutations to the write server and validates confirmation', async () => {
+    const clearances = {
+      clear: vi.fn(async input => ({ ...input, verifiedAt: '2026-10-16' })),
+      revoke: vi.fn(() => ({ revoked: true })), list: vi.fn(() => []),
+    };
+    const server = createFinancialAuditWriteMcpServer({ clearances });
+    const client = new Client({ name: 'write-test', version: '1.0.0' });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    connections.push(client, server);
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+    const tools = (await client.listTools()).tools;
+    expect(tools.map(tool => tool.name)).toEqual(expect.arrayContaining([
+      'list_verified_clearances', 'record_verified_clearance', 'revoke_verified_clearance',
+    ]));
+    expect(tools).toHaveLength(3);
+    expect(tools.find(tool => tool.name === 'record_verified_clearance').annotations.readOnlyHint).toBe(false);
+    const input = { accountKey: 'plaid:1', transactionId: '42', confirmedPosted: true,
+      reason: 'CSV row 3; sole retained representation of bank posting.' };
+    const response = await client.callTool({ name: 'record_verified_clearance', arguments: input });
+    expect(response.structuredContent.result).toMatchObject(input);
+    expect(clearances.clear).toHaveBeenCalledWith(input);
+    const invalid = await client.callTool({ name: 'record_verified_clearance', arguments: { ...input, confirmedPosted: false } });
+    expect(invalid.isError).toBe(true);
+    expect(clearances.clear).toHaveBeenCalledTimes(1);
+    await client.callTool({ name: 'revoke_verified_clearance', arguments: { accountKey: 'plaid:1', transactionId: '42' } });
+    expect(clearances.revoke).toHaveBeenCalledWith('plaid:1', '42');
+  });
+
 });

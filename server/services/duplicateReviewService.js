@@ -53,11 +53,10 @@ export class DuplicateReviewService {
     return getDateInTimezone(new Date(), this.settings.get('timezone') || 'UTC');
   }
 
-  async scan(accountKey, { anchorDate = this.today() } = {}) {
+  async scan(accountKey, { anchorDate = this.today(), startDate = addDays(anchorDate, -29), endDate = anchorDate } = {}) {
     if (!accountKey) throw new Error('An account is required for Duplicate Review.');
-    const startDate = addDays(anchorDate, -29);
     const [rawTransactions, categories, tags] = await Promise.all([
-      this.lunchMoney.getRawTransactions(startDate, anchorDate, { includeMetadata: true }),
+      this.lunchMoney.getRawTransactions(startDate, endDate, { includeMetadata: true }),
       this.lunchMoney.getCategories(),
       this.lunchMoney.getTags(),
     ]);
@@ -69,18 +68,21 @@ export class DuplicateReviewService {
     const ignoredPairIds = this.repository.listIgnoredPairIds(accountKey);
     const candidates = detectDuplicateCandidates({ transactions, ignoredPairIds })
       .map(candidate => ({ ...candidate, mergePreview: buildMetadataMerge(candidate.manual, candidate.imported) }));
-    return { accountKey, startDate, endDate: anchorDate, includeLow: true, candidates };
+    return { accountKey, startDate, endDate, includeLow: true, candidates };
   }
 
-  async getReportingSummary(accountKey, anchorDate = this.today()) {
-    const scan = await this.scan(accountKey, { includeLow: true, anchorDate });
+  async getReportingSummary(accountKey, anchorDate = this.today(), range = {}) {
+    const scan = await this.scan(accountKey, { anchorDate, ...range });
+    const coveredCandidates = scan.candidates.filter(candidate => !range.evidenceStartDate
+      || [candidate.manual, candidate.imported].some(transaction =>
+        transaction.date >= range.evidenceStartDate && transaction.date <= range.evidenceEndDate));
     const confidenceCounts = {
-      high: scan.candidates.filter(candidate => candidate.confidence === 'high').length,
-      medium: scan.candidates.filter(candidate => candidate.confidence === 'medium').length,
-      low: scan.candidates.filter(candidate => candidate.confidence === 'low').length,
+      high: coveredCandidates.filter(candidate => candidate.confidence === 'high').length,
+      medium: coveredCandidates.filter(candidate => candidate.confidence === 'medium').length,
+      low: coveredCandidates.filter(candidate => candidate.confidence === 'low').length,
     };
-    const candidates = scan.candidates
-      .filter(candidate => candidate.confidence !== 'low')
+    const candidates = coveredCandidates
+      .filter(candidate => range.includeLow || candidate.confidence !== 'low')
       .map(candidate => ({
         id: candidate.id,
         confidence: candidate.confidence,
@@ -246,17 +248,23 @@ export class DuplicateReviewService {
         || right.payeeSimilarity - left.payeeSimilarity
         || String(left.transactionId).localeCompare(String(right.transactionId))
       ));
+    // Amount/date proximity alone must not suppress unrelated purchases. Generic
+    // Venmo labels do not identify a recipient and need later duplicate review.
+    const matches = amountMatches.filter(match => match.payeeSimilarity >= 0.8
+      && !/^venmo(?:\s+payment)?$/i.test(String(payee).trim())
+      && !/^venmo(?:\s+payment)?$/i.test(String(match.payee).trim()));
     return {
-      shouldCreate: !existingExternalId && amountMatches.length === 0,
-      duplicateRisk: Boolean(existingExternalId || amountMatches.length > 0),
-      reason: existingExternalId ? 'exact_external_id' : amountMatches[0]?.reason || null,
+      shouldCreate: !existingExternalId && matches.length === 0,
+      duplicateRisk: Boolean(existingExternalId || matches.length > 0),
+      reason: existingExternalId ? 'exact_external_id' : matches[0]?.reason || null,
       exactExternalIdMatch: existingExternalId ? {
         transactionId: existingExternalId.id,
         date: existingExternalId.date,
         payee: existingExternalId.payee,
         source: existingExternalId.source,
       } : null,
-      amountDateMatches: amountMatches,
+      amountDateMatches: matches,
+      unrelatedAmountDateMatches: amountMatches.filter(match => !matches.includes(match)),
       window: { startDate, endDate },
     };
   }

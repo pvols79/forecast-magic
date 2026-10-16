@@ -138,3 +138,43 @@ describe('LunchMoneyService recurring item API compatibility', () => {
     expect(service.delete).toHaveBeenNthCalledWith(2, '/recurring/123');
   });
 });
+
+
+describe('Forecast verified replacements', () => {
+  const transaction = { id: 42, plaid_account_id: 5, date: '2026-09-05', amount: '75',
+    source: 'manual', is_pending: true, tag_ids: [41] };
+  const entry = { accountKey: 'plaid:5', transactionId: '42', reason: 'Retained replacement',
+    snapshot: { date: '2026-09-05', amountCents: -7500, source: 'manual' } };
+  it('loads clearances in the real forecast read path and includes settled history exactly once', async () => {
+    const list = vi.fn(() => [entry]);
+    const service = new LunchMoneyService(undefined, { list });
+    service.getRawTransactions = vi.fn(async () => [transaction]);
+    service.getTags = vi.fn(async () => [{ id: 41, name: 'LM Manual' }]);
+    const events = await service.getTransactions('2026-09-01', '2026-10-16', '2026-10-16');
+    expect(list).toHaveBeenCalledWith('plaid:5');
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ type: 'actual', balanceTreatment: 'included', isPending: false,
+      amount: -75, lmIsPending: true, effectiveStatus: 'cleared', tagNames: ['LM Manual'] });
+    expect(transaction.is_pending).toBe(true);
+  });
+  it.each([{ amount: '76' }, { date: '2026-09-06' }, { source: 'api' }])('rejects changed clearance snapshots: %j', change => {
+    const service = new LunchMoneyService();
+    expect(service.normalizeTransaction({ ...transaction, ...change }, '2026-10-16',
+      new Map([[41, 'LM Manual']]), [entry])).toMatchObject({
+      clearanceNeedsReview: true, balanceTreatment: 'unreflected', isPending: true,
+    });
+  });
+});
+
+
+it('fetches every transaction page for long audit windows', async () => {
+  const service = new LunchMoneyService();
+  service.get = vi.fn()
+    .mockResolvedValueOnce({ transactions: [{ id: 1 }], has_more: true })
+    .mockResolvedValueOnce({ transactions: [{ id: 2 }], has_more: false });
+  expect(await service.getRawTransactions('2026-01-01', '2026-10-16', { includeMetadata: true }))
+    .toEqual([{ id: 1 }, { id: 2 }]);
+  expect(service.get).toHaveBeenLastCalledWith('/transactions', expect.objectContaining({
+    offset: 2000, include_metadata: true, start_date: '2026-01-01', end_date: '2026-10-16',
+  }));
+});

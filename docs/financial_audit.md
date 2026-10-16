@@ -11,11 +11,11 @@ Forecast Magic's financial audit surface currently has three layers:
 - `FinancialAuditService` performs saved snapshot audits by combining Lunch Money
   account/transaction/tag data, Duplicate Review candidates, Financial Analytics
   overview data, locally stored Capital One statement imports, n8n alert evidence,
-  and audit-only clearances.
+  and verified settlement clearances shared with forecasts.
 - `FinancialAuditRepository` persists immutable audit runs, transaction
   observations, findings, statement imports, balance observations, n8n evidence,
   and cross-source transaction links in SQLite.
-- `financialAuditMcp.js` exposes read-only MCP tools. The legacy tools retrieve
+- `financialAuditMcp.js` exposes read-only audit tools and a separate write-key clearance endpoint. The legacy tools retrieve
   saved snapshots. The live reconciliation tools query Lunch Money pages for a
   model-led comparison against files attached in the conversation.
 
@@ -125,7 +125,7 @@ pending flag or placeholder tags on a manual/API record.
 An older pending signal is a review candidate, not proof of an unsettled bank
 charge. If a user accidentally deleted the import and deliberately retains a
 manual/API replacement, first verify the posted bank row and ensure it has only
-one LM representative. Then remove all placeholder tags from that replacement.
+one LM representative. With explicit authorization, record a verified clearance so audits and forecasts treat the retained replacement as historical; LM tags and native status remain unchanged. Recent settlement delays are not cleared automatically. Tag editing is a separate explicitly authorized alternative.
 If LM still reports `is_pending=true`, investigate the native status separately;
 tag removal alone cannot clear it. The [LM v2 specification](https://lunchmoney.dev/v2/openapi)
 defines `updateTransactionObject.is_pending` as system-defined and
@@ -164,7 +164,6 @@ Each legacy REST `POST /runs` stores an immutable snapshot for one compound acco
 - Capital One transactions missing from Lunch Money when the bank evidence is current and date-covered
 - Lunch Money transactions inside the Capital One export coverage that are not
   matched to Capital One and are not tagged as known pending/placeholders
-- Tagged placeholders still open beyond the configured business-day thresholds
 - n8n alert amounts that differ from a later settled Plaid transaction
 - Fund Allocation reservations and missed-recurring/opening adjustments
 - The remaining unexplained balance difference
@@ -195,7 +194,7 @@ AUDIT_READ_TOKEN=read-only-secret
 AUDIT_INGEST_TOKEN=evidence-upload-secret
 ```
 
-`AUDIT_READ_TOKEN` permits audit execution and retrieval. It also protects `/mcp`. `AUDIT_INGEST_TOKEN` permits Capital One and n8n evidence uploads. Do not provide the ingest token to ChatGPT.
+`AUDIT_READ_TOKEN` permits audit execution and retrieval. It also protects `/mcp`. `AUDIT_INGEST_TOKEN` is the write key: it permits evidence ingestion and explicit clearance writes. Configure it only on a trusted write connection, never the read-only `/mcp` connection.
 
 Optional thresholds are:
 
@@ -205,7 +204,7 @@ AUDIT_PENDING_CRITICAL_BUSINESS_DAYS=5
 AUDIT_STATEMENT_FRESH_HOURS=36
 ```
 
-The read and ingest REST routes also accept an active Admin browser session. MCP always requires the read-only Bearer token. Missing token configuration fails closed with HTTP `503`; a missing or incorrect credential returns HTTP `401`.
+The read and ingest REST routes also accept an active Admin browser session. MCP `/mcp` requires the read key; `/mcp/write` requires the write key. Browser sessions do not authorize either MCP endpoint. Missing token configuration fails closed with HTTP `503`; a missing or incorrect credential returns HTTP `401`.
 
 ## REST API
 
@@ -377,7 +376,7 @@ lower audit-related tool-result tokens compared with page-by-page live
 transaction dumps. Open WebUI conversation accumulation and duplicated
 text/structured rendering must be measured separately.
 
-ChatGPT must be able to reach the MCP URL. A server that is available only on a home LAN or VPN is not directly reachable by ChatGPT's hosted connector service. Keep using the REST API from local n8n immediately; for ChatGPT, use an intentionally configured secure tunnel or another remote HTTPS path with the read-only token. Do not expose the ingest token.
+ChatGPT must be able to reach the MCP URL. A server that is available only on a home LAN or VPN is not directly reachable by ChatGPT's hosted connector service. Keep using the REST API from local n8n immediately; for ChatGPT, use an intentionally configured secure tunnel or another remote HTTPS path with the appropriate connection-specific token. Keep the write key only in the trusted write connector authentication configuration.
 
 Custom MCP app availability depends on the ChatGPT plan and workspace settings. In ChatGPT developer mode, add the remote `/mcp` URL, configure authentication, scan the tools, and refresh the app whenever tool definitions change. The MCP endpoint can also be used by other compatible clients that support Streamable HTTP and Bearer authentication.
 
@@ -399,14 +398,14 @@ The audit is deliberately advisory. Financial decisions should ultimately be che
 
 Administrators can record that a retained transaction is verified posted without
 changing Lunch Money's system-defined `is_pending` field or its tags. This is an
-audit-only override, not a forecast adjustment or a duplicate resolution.
+settlement override shared by audits and forecasts, not a duplicate resolution. A verified historical replacement is included in the synced balance rather than deducted again as pending.
 
 - `GET /api/financial-audit/clearances?accountKey=plaid:123` reads the register.
-- `POST /api/financial-audit/clearances` requires an admin session and JSON containing
+- `POST /api/financial-audit/clearances` requires the write key or an admin session and JSON containing
   `accountKey`, `transactionId`, `confirmedPosted: true`, and `reason`.
   The reason should identify bank evidence and confirm this is the only retained
   representation of that bank transaction. No evidence upload is required.
-- `DELETE /api/financial-audit/clearances/:transactionId?accountKey=plaid:123` requires an
+- `DELETE /api/financial-audit/clearances/:transactionId?accountKey=plaid:123` requires the write key or an
   admin session and revokes the override. The record remains visible as revoked.
 - The read-only MCP tool `list_verified_clearances` lists entries; it cannot change them.
 
@@ -418,6 +417,45 @@ Date, amount or source changes invalidate application of the override and set
 
 New saved audit runs honor clearances and retain their evidence. Existing saved
 runs are historical snapshots and are not rewritten; use live reconciliation
-data or run a new audit for current status. Dashboard forecast calculations and
-LM records are unchanged. Register management currently uses the admin API,
-not a dashboard form. Read-only audit tokens cannot create or revoke entries.
+data or run a new audit for current status. Forecast normalization also applies valid clearances: retained replacements are actual historical events included in the synced balance, without a second pending deduction. LM records are unchanged. Register management currently uses the admin API,
+not a dashboard form. Read-only audit tokens cannot create or revoke entries. The write-key MCP endpoint can do so after explicit user authorization.
+
+
+### Reconciliation report sections and settlement timing
+
+Use the full bank-download coverage (unless a narrower period is explicitly requested),
+with five days of LM padding on both sides. Always report separately:
+
+1. Bank rows not accounted for in LM. A single matching placeholder counts as represented.
+2. All LM rows without bank matches, separating expected pending, unexplained extras, and boundary rows.
+3. Potential duplicates across the complete evidence period, including padded cross-boundary pairs,
+   independently of the web Duplicate Review page's default 30-day window.
+4. Boundary matches and unmatched boundary rows, explaining authorization/posting date drift.
+
+Bank evidence controls what posted at the bank. Latest Plaid/LM status controls settlement
+classification until import/dedup catches up. Recent bank-posted placeholders are normal
+sync timing, not missing transactions or grounds to auto-clear. Explicit administrator
+clearances are for intentionally retained replacements whose imports were deleted.
+Same-day identical bank amounts may be reconciled as a recipient-supported set using Venmo
+counts and totals; assigning indistinguishable bank row order is unnecessary.
+
+Preflight blocks exact email external IDs or same signed amount within five days with
+payee similarity at least 0.8. Unrelated payees and generic Venmo labels alone do not
+block creation. Venmo recipient names should be preserved; uncertain matches are left
+for later duplicate review rather than suppressing a valid placeholder.
+
+
+### Automated clearance writes
+
+The separate Streamable HTTP endpoint `/mcp/write` accepts only `AUDIT_INGEST_TOKEN`
+and exposes `list_verified_clearances`, `record_verified_clearance`, and
+`revoke_verified_clearance`. The existing `/mcp` remains read-only and uses
+`AUDIT_READ_TOKEN`; it never exposes mutation tools. Store the write key in the
+connector's authentication configuration, not a conversation or evidence file.
+The REST clearance POST/DELETE routes accept the same write key or an admin session.
+
+Recording requires the account, transaction ID, `confirmedPosted: true`, and an
+evidence reason. The service refreshes the LM transaction and records a fingerprint
+of its date, amount, source, account and ID. Revocation is reversible. A changed
+snapshot stops the override. Use this only for explicitly confirmed retained
+replacements, not ordinary bank/Plaid settlement delays.

@@ -46,6 +46,24 @@ describe('projectCashFlow', () => {
     expect(balanceOn(resolved, '2026-09-15')).toBeCloseTo(856.21);
   });
 
+  it('treats a verified retained replacement exactly like a settled import in the forecast', () => {
+    const service = new LunchMoneyService();
+    const raw = { id: 42, plaid_account_id: 1, date: '2026-09-05', amount: '75',
+      payee: 'Retained payment', source: 'manual', is_pending: true, tag_ids: [1] };
+    const anchor = '2026-10-16';
+    const tags = new Map([[1, 'LM Manual']]);
+    const entry = { accountKey: 'plaid:1', transactionId: '42',
+      snapshot: { date: raw.date, amountCents: -7500, source: raw.source } };
+    const project = event => projectCashFlow([checkingAccount], [event], 'plaid:1', 1, { anchorDate: anchor });
+    const before = project(service.normalizeTransaction(raw, anchor, tags));
+    expect(balanceOn(before, anchor)).toBe(2925);
+    const verified = project(service.normalizeTransaction(raw, anchor, tags, [entry]));
+    const imported = project(service.normalizeTransaction({ ...raw, source: 'plaid', is_pending: false, tag_ids: [] }, anchor));
+    expect(verified.dailyBalances).toEqual(imported.dailyBalances);
+    expect(verified.openingBalance.adjustmentEvents).toEqual([]);
+    expect(balanceOn(verified, anchor)).toBe(3000);
+  });
+
   it('projects deterministic daily ledger balances from normalized events', () => {
     const projection = projectCashFlow(
       [checkingAccount],

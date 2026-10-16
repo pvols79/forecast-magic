@@ -1,5 +1,5 @@
 import express, { Router } from 'express';
-import { requireAdmin, requireAuditIngest, requireAuditRead } from '../auth.js';
+import { requireAuditIngest, requireAuditRead } from '../auth.js';
 import { AuditClearanceService } from '../services/auditClearanceService.js';
 import { getDateInTimezone } from '../domain/periods.js';
 import { SettingsRepository } from '../repositories/settingsRepository.js';
@@ -54,16 +54,16 @@ export const createFinancialAuditRouter = (
   ingestGuard = requireAuditIngest,
   reader = new LunchMoneyReadService(),
   clearances = new AuditClearanceService(),
-  adminGuard = requireAdmin
+  clearanceWriteGuard = ingestGuard
 ) => {
   const router = Router();
   router.get('/clearances', readGuard, (request, response) => {
     response.json(clearances.list(request.query.accountKey));
   });
-  router.post('/clearances', adminGuard, async (request, response) => {
+  router.post('/clearances', clearanceWriteGuard, async (request, response) => {
     response.status(201).json(await clearances.clear(request.body || {}));
   });
-  router.delete('/clearances/:transactionId', adminGuard, (request, response) => {
+  router.delete('/clearances/:transactionId', clearanceWriteGuard, (request, response) => {
     response.json(clearances.revoke(request.query.accountKey, request.params.transactionId));
   });
   router.get('/lunch-money/reference', readGuard, async (request, response) => {

@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { closeDatabase, configureDatabase } from '../db/database.js';
 import { runMigrations } from '../db/migrate.js';
 import { FinancialAuditRepository } from '../repositories/financialAuditRepository.js';
@@ -153,6 +153,11 @@ describe('FinancialAuditService', () => {
       endDate: '2026-09-05',
       source: 'capital_one_csv_coverage',
     });
+    expect(result.sourceFreshness.capitalOne).toMatchObject({
+      filename: 'capital-one.csv',
+      rowCount: 1,
+      source: 'capital_one_csv',
+    });
     expect(result.summary.facts.reconciliationSections).toMatchObject({
       capitalOneOnly: { count: 0, totalCents: 0 },
       lunchMoneyOnly: { count: 2, totalCents: -1500 },
@@ -163,6 +168,14 @@ describe('FinancialAuditService', () => {
       expect.objectContaining({ key: 'extra-lunch-money-11', category: 'extra_lunch_money' }),
       expect.objectContaining({ key: 'extra-lunch-money-13', category: 'extra_lunch_money' }),
     ]));
+  });
+
+  it('does not emit age-based stale pending findings for old placeholder tags', async () => {
+    const service = createService();
+    const result = await service.run('plaid:1', '2026-09-15');
+
+    expect(result.findings.some(item => item.category === 'stale_pending')).toBe(false);
+    expect(result.summary.facts.transactionIntegrity.stalePendingCount).toBeUndefined();
   });
 
   it('does not claim transactions are missing without fresh bank evidence', async () => {
@@ -242,6 +255,36 @@ describe('FinancialAuditService', () => {
       amountCents: -500,
     });
     expect(evidence.evidence.transaction.notes).toBeUndefined();
+  });
+
+  it('reports pending LM-only rows, padded boundary matches and full-period duplicate scope', async () => {
+    const getReportingSummary = vi.fn(async () => ({ needsReview: 0, candidates: [] }));
+    const service = new FinancialAuditService({ repository, analytics,
+      duplicateReview: { getReportingSummary },
+      lunchMoney: { ...lunchMoney, getRawTransactions: async () => [
+        { id: 90, plaid_account_id: 1, source: 'plaid', date: '2026-09-01', amount: '40', payee: 'Dutch Bros' },
+        { id: 91, plaid_account_id: 1, source: 'api', date: '2026-08-31', amount: '10', payee: 'New purchase', tag_ids: [1] },
+        { id: 92, plaid_account_id: 1, source: 'plaid', date: '2026-09-02', amount: '7', payee: 'Boundary purchase' },
+      ] },
+    });
+    service.commitCapitalOneImport('plaid:1', [
+      'Transaction Date,Transaction Description,Transaction Type,Transaction Amount,Balance',
+      '08/31/2026,DUTCH BROS,Debit,40.00,1000.00',
+      '01/01/2026,Opening purchase,Debit,5.00,1040.00',
+    ].join('\n'), { importedAt: new Date().toISOString() });
+    const result = await service.run('plaid:1', '2026-09-06');
+    expect(getReportingSummary).toHaveBeenCalledWith('plaid:1', '2026-08-31', {
+      startDate: '2025-12-27', endDate: '2026-09-05', includeLow: true,
+      evidenceStartDate: '2026-01-01', evidenceEndDate: '2026-08-31',
+    });
+    expect(result.summary.facts.reconciliationSections).toMatchObject({
+      capitalOneOnly: { count: 1, totalCents: -500 },
+      allLunchMoneyOnly: { count: 1, totalCents: -1000 },
+      knownPendingExcludedFromLunchMoneyOnly: { count: 1 },
+      boundaryTransactions: { count: 1, totalCents: -700 },
+      boundaryMatches: { count: 1, totalCents: -4000 },
+    });
+    expect(result.findings.some(item => item.key === 'missing-import-90')).toBe(false);
   });
 
 });

@@ -1,4 +1,4 @@
-// Audit settlement is a local assertion, never a mutation of LM's native flags.
+// Verified settlement is shared by audits and forecasts; LM provenance stays unchanged.
 export const applyAuditClearance = (transaction, entries) => {
   if (!transaction) return transaction;
   const entry = entries.find(item => !item.revokedAt
@@ -17,10 +17,11 @@ export const applyAuditClearance = (transaction, entries) => {
     lmIsPending: transaction.isPending,
     isPending: false,
     effectiveStatus: 'cleared',
+    balanceTreatment: 'included',
     auditClearance: entry,
     pendingExplanation: {
       classification: 'verified_cleared', balanceTreatment: 'included',
-      explanation: 'Verified posted by an administrator. Treat as cleared in audits, even if LM retains pending flags or placeholder tags.',
+      explanation: 'Verified posted by an administrator. Treat as cleared in audits and forecasts, even if LM retains pending flags or placeholder tags.',
       originalSignals: transaction.pendingExplanation,
       resolutionAction: 'none',
     },

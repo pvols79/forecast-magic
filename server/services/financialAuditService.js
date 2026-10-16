@@ -1,9 +1,8 @@
-import { config } from '../config.js';
 import { AuditClearanceRepository } from '../repositories/auditClearanceRepository.js';
 import { applyAuditClearance } from '../domain/auditClearance.js';
 import {
   assessAuditHealth, buildBalanceBridge,
-  findStalePendingTransactions, findTagComplianceIssues, matchExternalTransactions,
+  findTagComplianceIssues, matchExternalTransactions,
   normalizeAuditTransaction, parseCapitalOneCsv, summarizeTransactionSources,
 } from '../domain/financialAudit.js';
 import { payeeSimilarity } from '../domain/duplicateReview.js';
@@ -180,7 +179,7 @@ export class FinancialAuditService {
       this.lunchMoney.getTags(),
       this.lunchMoney.getRawTransactions(queryStartDate, queryEndDate, { includeMetadata: true }),
       this.analytics.getOverview(accountKey, endDate, { view: 'admin' }),
-      this.duplicateReview.getReportingSummary(accountKey, endDate),
+      this.duplicateReview.getReportingSummary(accountKey, endDate, { startDate: queryStartDate, endDate: queryEndDate, includeLow: true, evidenceStartDate: startDate, evidenceEndDate: endDate }),
     ]);
     const account = [...manualAccounts, ...plaidAccounts].find(item => item.key === accountKey);
     if (!account) {
@@ -203,9 +202,6 @@ export class FinancialAuditService {
       ? matchExternalTransactions(statementTransactions, transactions)
       : { links: [], unmatchedExternal: [], unmatchedLunchMoney: [] };
     const compliance = findTagComplianceIssues(transactions);
-    const stalePending = findStalePendingTransactions(
-      transactions, endDate, config.auditPendingWarningBusinessDays
-    );
     const lifecycleChanges = lifecycleCandidates(
       n8nEvidence,
       transactions.filter(transaction => transaction.source === 'plaid' && !transaction.isPending)
@@ -266,15 +262,6 @@ export class FinancialAuditService {
         { transaction: publicTransaction(transaction) }
       ));
     }
-    for (const transaction of stalePending) {
-      const severity = transaction.businessDaysOpen > config.auditPendingCriticalBusinessDays ? 'critical' : 'warning';
-      findings.push(finding(
-        `stale-pending-${transaction.transactionId}`, severity, 'stale_pending',
-        'Older transaction still has a pending signal',
-        `${transaction.payee} is dated ${transaction.businessDaysOpen} business days ago and still has a native pending flag or placeholder tag. This does not prove it remains unsettled at the bank; it may be an intentionally retained manual/API replacement. Verify bank evidence before changing its tags or flag.`,
-        { transaction: publicTransaction(transaction), businessDaysOpen: transaction.businessDaysOpen }
-      ));
-    }
     for (const change of lifecycleChanges) {
       findings.push(finding(
         `settlement-change-${change.transaction.transactionId}`, 'warning', 'transaction_integrity',
@@ -304,9 +291,13 @@ export class FinancialAuditService {
     const sourceFreshness = {
       lunchMoney: { fetchedAt: startedAt, accountLastUpdatedAt: account.lastUpdated },
       capitalOne: latestStatement ? {
+        filename: latestStatement.filename,
+        contentSha256: latestStatement.contentSha256,
         importedAt: latestStatement.importedAt,
         coverageStart: latestStatement.coverageStart,
         coverageEnd: latestStatement.coverageEnd,
+        rowCount: latestStatement.rowCount,
+        source: latestStatement.source,
         usedAsAuditBounds: true,
         freshEnoughForMissingAudit: true,
       } : null,
@@ -326,6 +317,15 @@ export class FinancialAuditService {
     const reconciliationSections = {
       capitalOneOnly: limitedRecords(externalMatch.unmatchedExternal, compactStatementTransaction),
       lunchMoneyOnly: limitedRecords(actionableLunchMoneyOnly, publicTransaction),
+      allLunchMoneyOnly: limitedRecords(coveredLunchMoneyOnly, publicTransaction),
+      boundaryTransactions: limitedRecords(externalMatch.unmatchedLunchMoney.filter(item =>
+        !isCoveredByStatement(item, { coverageStart: startDate, coverageEnd: endDate })), publicTransaction),
+      boundaryMatches: limitedRecords(externalMatch.links.filter(link =>
+        link.lunchMoney.date < startDate || link.lunchMoney.date > endDate).map(link => ({ ...link, amountCents: link.external.amountCents })), link => ({
+        bank: compactStatementTransaction(link.external), lunchMoney: publicTransaction(link.lunchMoney),
+        dateDistance: link.dateDistance,
+      })),
+      potentialDuplicates: duplicateSummary,
       knownPendingExcludedFromLunchMoneyOnly: limitedRecords(knownPendingExcludedFromLmOnly, publicTransaction),
     };
     const pendingImpactCents = bridge.taggedN8nPlaceholderCents + bridge.taggedManualPlaceholderCents;
@@ -355,14 +355,12 @@ export class FinancialAuditService {
         reconciliationSections,
         tagCompliance: {
           untaggedN8nCandidateCount: compliance.untaggedN8nCandidates.length,
-          suspiciousPendingTagCount: compliance.stalePendingCandidates.length,
         },
         transactionIntegrity: {
           possibleDuplicateCount: duplicateSummary.needsReview,
           missingFromLunchMoneyCount: freshStatement ? externalMatch.unmatchedExternal.length : null,
           extraLunchMoneyCount: freshStatement ? actionableLunchMoneyOnly.length : null,
           knownPendingExcludedFromExtraCount: freshStatement ? knownPendingExcludedFromLmOnly.length : null,
-          stalePendingCount: stalePending.length,
           settlementChangeCount: lifecycleChanges.length,
         },
         spendablePosition: overview.openingReconciliation,

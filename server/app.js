@@ -1,6 +1,6 @@
 import path from 'node:path';
 import express from 'express';
-import { attachAdminStatus } from './auth.js';
+import { attachAdminStatus, requireMcpAuditWrite } from './auth.js';
 import { config } from './config.js';
 import { createAdminWorkflowRouter } from './routes/adminWorkflowRoutes.js';
 import { createAuthRouter } from './routes/authRoutes.js';
@@ -9,6 +9,7 @@ import { createFinancialAuditRouter } from './routes/financialAuditRoutes.js';
 import { createFinancialAnalyticsRouter } from './routes/financialAnalyticsRoutes.js';
 import { createLunchMoneyRouter } from './routes/lunchMoneyRoutes.js';
 import { createMcpRouter } from './routes/mcpRoutes.js';
+import { createFinancialAuditWriteMcpServer } from './mcp/financialAuditMcp.js';
 import { createOperationalFundRouter } from './routes/operationalFundRoutes.js';
 import { createReportingRouter } from './routes/reportingRoutes.js';
 import { createSettingsRouter } from './routes/settingsRoutes.js';
@@ -33,6 +34,7 @@ export const createApp = () => {
   app.use('/api/settings', createSettingsRouter());
   app.use('/api/lunch-money', createLunchMoneyRouter());
   app.use('/api/funds', createOperationalFundRouter());
+  app.use('/mcp/write', createMcpRouter(createFinancialAuditWriteMcpServer, requireMcpAuditWrite));
   app.use('/mcp', createMcpRouter());
 
   app.use('/api', (request, response) => response.status(404).json({ error: 'API endpoint not found.' }));

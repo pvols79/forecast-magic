@@ -170,7 +170,7 @@ const daysApart = (left, right) => Math.abs(
 const matchScore = (external, lunchMoney) => {
   if (external.amountCents !== lunchMoney.amountCents) return null;
   const dateDistance = daysApart(external.date, lunchMoney.date);
-  if (dateDistance > 3) return null;
+  if (dateDistance > 5) return null;
   const similarity = Math.max(
     payeeSimilarity(external.description || external.payee, lunchMoney.payee),
     payeeSimilarity(external.description || external.payee, lunchMoney.originalPayee)

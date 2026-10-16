@@ -12,3 +12,6 @@ data/
 *.db-wal
 *.key
 *.pem
+
+# Local audit working files may contain private financial evidence.
+tmp/

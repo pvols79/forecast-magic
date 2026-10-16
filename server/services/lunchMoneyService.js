@@ -1,6 +1,8 @@
 import axios from 'axios';
 import { getTransactionBalanceTreatment } from '../../src/transactionBalance.js';
 import { config } from '../config.js';
+import { AuditClearanceRepository } from '../repositories/auditClearanceRepository.js';
+import { applyAuditClearance } from '../domain/auditClearance.js';
 import { SettingsRepository } from '../repositories/settingsRepository.js';
 
 const unwrapList = (data, key) => {
@@ -39,8 +41,9 @@ const isSatisfiedByNearbyFoundTransaction = (missingDate, foundTransactions, max
   foundTransactions.some(match => match.date && dateDistanceDays(missingDate, match.date) <= maxDays);
 
 export class LunchMoneyService {
-  constructor(settingsRepository = new SettingsRepository()) {
+  constructor(settingsRepository = new SettingsRepository(), clearances = new AuditClearanceRepository()) {
     this.settingsRepository = settingsRepository;
+    this.clearances = clearances;
   }
 
   getApiKey() {
@@ -139,13 +142,20 @@ export class LunchMoneyService {
     };
   }
 
-  normalizeTransaction(transaction, anchorDate, tagNamesById = new Map()) {
+  normalizeTransaction(transaction, anchorDate, tagNamesById = new Map(), clearances = []) {
     const source = transaction.manual_account_id != null ? 'manual' : 'plaid';
     const id = transaction.manual_account_id ?? transaction.plaid_account_id;
     if (id == null) return null;
     const lunchMoneySource = transaction.source;
     const tagIds = transaction.tag_ids || [];
     const tagNames = tagIds.map(tagId => tagNamesById.get(Number(tagId))).filter(Boolean);
+    const settlement = applyAuditClearance({
+      accountKey: accountKey(source, id), transactionId: String(transaction.id),
+      date: transaction.date, amountCents: Math.round(-toNumber(transaction.to_base ?? transaction.amount) * 100),
+      source: lunchMoneySource, isPending: Boolean(transaction.is_pending),
+      pendingExplanation: { nativePending: Boolean(transaction.is_pending) },
+    }, clearances);
+    const verified = Boolean(settlement.auditClearance);
     return {
       id: `transaction:${transaction.id}`,
       accountId: id,
@@ -154,11 +164,11 @@ export class LunchMoneyService {
       date: transaction.date,
       description: transaction.payee || transaction.notes || 'Transaction',
       amount: -toNumber(transaction.to_base ?? transaction.amount),
-      type: transaction.is_pending ? 'pending' : (transaction.date > anchorDate ? 'future' : 'actual'),
+      type: verified ? 'actual' : transaction.is_pending ? 'pending' : (transaction.date > anchorDate ? 'future' : 'actual'),
       transactionId: transaction.id,
       recurringId: transaction.recurring_id,
       lunchMoneySource,
-      balanceTreatment: getTransactionBalanceTreatment({
+      balanceTreatment: verified ? 'included' : getTransactionBalanceTreatment({
         accountSource: source,
         lunchMoneySource,
         isPending: Boolean(transaction.is_pending),
@@ -167,8 +177,10 @@ export class LunchMoneyService {
       categoryId: transaction.category_id,
       tagIds,
       tagNames,
-      isPending: Boolean(transaction.is_pending),
-      is_pending: Boolean(transaction.is_pending),
+      isPending: verified ? false : Boolean(transaction.is_pending),
+      is_pending: verified ? false : Boolean(transaction.is_pending),
+      ...(verified ? { auditClearance: settlement.auditClearance, lmIsPending: Boolean(transaction.is_pending), effectiveStatus: 'cleared' } : {}),
+      ...(settlement.clearanceNeedsReview ? { clearanceNeedsReview: true } : {}),
     };
   }
 
@@ -279,20 +291,29 @@ export class LunchMoneyService {
       this.getTags(),
     ]);
     const tagNamesById = new Map(tags.map(tag => [tag.id, tag.name]));
+    const clearances = new Map();
+    for (const transaction of transactions) {
+      const source = transaction.manual_account_id != null ? 'manual' : 'plaid';
+      const id = transaction.manual_account_id ?? transaction.plaid_account_id;
+      if (id != null && !clearances.has(accountKey(source, id))) {
+        clearances.set(accountKey(source, id), this.clearances.list(accountKey(source, id)));
+      }
+    }
     return transactions
-      .map(transaction => this.normalizeTransaction(transaction, anchorDate, tagNamesById))
+      .map(transaction => this.normalizeTransaction(transaction, anchorDate, tagNamesById,
+        clearances.get(accountKey(transaction.manual_account_id != null ? 'manual' : 'plaid',
+          transaction.manual_account_id ?? transaction.plaid_account_id)) || []))
       .filter(Boolean);
   }
 
   async getRawTransactions(startDate, endDate, { includeMetadata = false } = {}) {
-    const data = await this.get('/transactions', {
+    // Audit windows can exceed the API's default page size. Keep the same
+    // split/group defaults, but retrieve every page for forecasts and scans.
+    return this.getAllRawTransactions({
       start_date: startDate,
       end_date: endDate,
-      include_pending: true,
       ...(includeMetadata ? { include_metadata: true } : {}),
     });
-    // Default v2 behavior omits split parents and grouped children, preventing double-counting.
-    return unwrapList(data, 'transactions');
   }
 
   async getAllRawTransactions(params = {}) {

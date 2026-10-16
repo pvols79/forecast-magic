@@ -80,6 +80,10 @@ export const requireMcpAuditRead = createRequireBearerToken(config.auditReadToke
   configurationName: 'MCP audit API',
 });
 
+export const requireMcpAuditWrite = createRequireBearerToken(config.auditIngestToken, {
+  configurationName: 'MCP audit write API',
+});
+
 export const login = (request, response) => {
   if (!config.adminPassword || request.body?.password === config.adminPassword) {
     const secure = request.secure || request.headers['x-forwarded-proto'] === 'https';

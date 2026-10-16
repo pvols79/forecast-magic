@@ -227,3 +227,32 @@ export const createFinancialAuditMcpServer = ({
 
   return server;
 };
+
+
+// A separate endpoint/key exposes only explicit clearance actions. The normal
+// audit connector never receives mutation tools or write credentials.
+export const createFinancialAuditWriteMcpServer = ({ clearances = new AuditClearanceService() } = {}) => {
+  const server = new McpServer({ name: 'forecast-magic-clearance-write', version: '1.0.0' }, {
+    instructions: 'Only record or revoke a verified clearance when explicitly requested by the user. Verify fresh LM identity and bank evidence. Never clear recent import delays automatically. These operations change local audit and forecast settlement treatment, not LM transactions.',
+  });
+  server.registerTool('list_verified_clearances', {
+    description: 'Read existing clearances before or after an explicitly authorized write.',
+    inputSchema: accountSchema, annotations: readOnlyAnnotations,
+  }, ({ accountKey }) => result(clearances.list(accountKey)));
+  server.registerTool('record_verified_clearance', {
+    description: 'Explicitly mark a retained manual/API replacement as settled after bank verification. Requires user authorization, confirmed bank posting, and an evidence reason. Applies to audits and forecasts; leaves LM unchanged.',
+    inputSchema: z.object({
+      accountKey: accountSchema.shape.accountKey,
+      transactionId: z.string().regex(/^\d+$/),
+      confirmedPosted: z.literal(true),
+      reason: z.string().trim().min(1).max(2000),
+    }),
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  }, async input => result(await clearances.clear(input)));
+  server.registerTool('revoke_verified_clearance', {
+    description: 'Revoke a clearance only when explicitly requested. Restores ordinary LM-derived settlement treatment without changing LM.',
+    inputSchema: z.object({ accountKey: accountSchema.shape.accountKey, transactionId: z.string().regex(/^\d+$/) }),
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  }, ({ accountKey, transactionId }) => result(clearances.revoke(accountKey, transactionId)));
+  return server;
+};
