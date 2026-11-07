@@ -70,3 +70,18 @@ describe('Operational Fund projection presentation', () => {
     expect(sanitizeProjection(projection, true)).toBe(projection);
   });
 });
+
+it('does not expose hidden child names or transactions through a visible parent', () => {
+  const nested = {
+    ...projection,
+    currentFunds: [{ ...projection.currentFunds[0], children: [{ id: 3, name: 'Private gifts', householdVisible: false }], transactions: [
+      { ...projection.currentFunds[0].transactions[0], fundId: 1 },
+      { ...projection.currentFunds[0].transactions[0], fundId: 3, description: 'Private purchase' },
+      { ...projection.currentFunds[0].transactions[0], fundId: 1, type: 'adjustment', description: 'Private local reason' },
+    ] }],
+    days: [{ ...projection.days[0], funds: [{ ...projection.days[0].funds[0], children: [{ name: 'Private gifts' }] }] }],
+  };
+  const shared = sanitizeProjection(nested, false);
+  expect(shared.currentFunds[0].transactions).toHaveLength(1);
+  expect(JSON.stringify(shared)).not.toContain('Private');
+});

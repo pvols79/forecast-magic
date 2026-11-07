@@ -24,7 +24,9 @@ export const sanitizeProjection = (projection, isAdmin) => {
   });
   const sharedFund = fund => ({
     ...fund,
-    transactions: (fund.transactions || []).map(sharedTransaction),
+    children: undefined,
+    adjustments: undefined,
+    transactions: (fund.transactions || []).filter(transaction => transaction.type !== 'adjustment' && (!transaction.fundId || transaction.fundId === fund.id || fund.children?.find(child => child.id === transaction.fundId)?.householdVisible)).map(sharedTransaction),
   });
   return {
     ...projection,
@@ -33,7 +35,7 @@ export const sanitizeProjection = (projection, isAdmin) => {
       .map(sharedFund),
     days: projection.days.map(day => ({
       ...day,
-      funds: day.funds.filter(fund => fund.householdVisible),
+      funds: day.funds.filter(fund => fund.householdVisible).map(fund => ({ ...fund, children: undefined })),
       boundaryAnnotations: day.boundaryAnnotations.filter(annotation => {
         const fund = projection.currentFunds.find(candidate => candidate.id === annotation.fundId);
         return fund?.householdVisible;
@@ -66,6 +68,13 @@ export const createOperationalFundRouter = (
     funds: repository.listByAccount(request.query.accountKey),
   }));
 
+  router.get('/:id/register', requireAdmin, async (request, response) => {
+    const today = getDateInTimezone(new Date(), settings.get('timezone') || 'UTC');
+    const rows = await service.getRegister(Number(request.params.id), today);
+    if (!rows) return response.status(404).json({ error: 'Fund Allocation not found.' });
+    return response.json({ rows });
+  });
+
   router.get('/:id', requireAdmin, (request, response) => {
     const fund = repository.getById(Number(request.params.id));
     if (!fund) return response.status(404).json({ error: 'Fund Allocation not found.' });
@@ -90,6 +99,23 @@ export const createOperationalFundRouter = (
   router.delete('/:id', requireAdmin, (request, response) => {
     if (!repository.delete(Number(request.params.id))) return response.status(404).json({ error: 'Fund Allocation not found.' });
     return response.status(204).end();
+  });
+
+  router.post('/:id/adjustments', requireAdmin, async (request, response) => {
+    const id = Number(request.params.id);
+    const existing = repository.getById(id);
+    if (!existing) return response.status(404).json({ error: 'Fund Allocation not found.' });
+    const today = getDateInTimezone(new Date(), settings.get('timezone') || 'UTC');
+    const input = { ...request.body, date: today };
+    if (input.amountCents < 0) {
+      const projection = await service.getProjection(existing.accountKey, today, today);
+      const state = projection.currentFunds.flatMap(fund => [fund, ...(fund.children || [])]).find(fund => fund.id === id);
+      const available = state?.ownRemainingCents ?? state?.remainingCents ?? 0;
+      if (-input.amountCents > available) return response.status(400).json({ error: 'The withdrawal exceeds the available Fund balance.' });
+    }
+    const fund = repository.addAdjustment(id, input);
+    if (!fund) return response.status(404).json({ error: 'Fund Allocation not found.' });
+    return response.status(201).json({ fund });
   });
 
   router.post('/:id/exclusions', requireAdmin, (request, response) => {

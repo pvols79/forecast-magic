@@ -26,7 +26,7 @@ const emptyFund = accountKey => ({
 const weekdays = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
-const OperationalFundForm = ({ accountKey, categories, fund, onSave, onCancel, saving }) => {
+const OperationalFundForm = ({ accountKey, categories, funds = [], fund, onSave, onCancel, saving }) => {
   const [value, setValue] = useState(emptyFund(accountKey));
 
   useEffect(() => setValue(fund ? { ...fund } : emptyFund(accountKey)), [fund, accountKey]);
@@ -90,6 +90,17 @@ const OperationalFundForm = ({ accountKey, categories, fund, onSave, onCancel, s
           <FormLabel>Name</FormLabel>
           <Input value={value.name} onChange={event => set('name', event.target.value)} />
         </FormControl>
+        {!funds.some(item => item.parentId === value.id) && <FormControl>
+          <FormLabel>Parent fund</FormLabel>
+          <Select value={value.parentId || ''} onChange={event => set('parentId', event.target.value ? Number(event.target.value) : null)}>
+            <option value="">None — top-level fund</option>
+            {funds.filter(item => !item.parentId && item.id !== value.id).map(item => <option value={item.id} key={item.id}>{item.name}</option>)}
+          </Select>
+        </FormControl>}
+        <HStack align="start">
+          <FormControl><FormLabel>Occasion date (optional)</FormLabel><Input type="date" value={value.occasionDate || ''} onChange={event => set('occasionDate', event.target.value || null)} /></FormControl>
+          <FormControl><FormLabel>Purchase completed on</FormLabel><Input type="date" value={value.purchasedOn || ''} onChange={event => set('purchasedOn', event.target.value || null)} /></FormControl>
+        </HStack>
         <FormControl isRequired>
           <FormLabel>Type</FormLabel>
           <Select value={value.fundType} onChange={event => setFundType(event.target.value)}>
@@ -111,7 +122,7 @@ const OperationalFundForm = ({ accountKey, categories, fund, onSave, onCancel, s
         {value.fundType === 'reserved' && (
           <HStack align="start">
             <FormControl isRequired>
-              <FormLabel>Reserved Amount</FormLabel>
+              <FormLabel>Opening Reserved Amount</FormLabel>
               <NumberInput min={0} precision={2} value={dollars(value.allocationCents)} onChange={amount => set('allocationCents', cents(amount) ?? 0)}>
                 <NumberInputField />
               </NumberInput>
@@ -129,7 +140,7 @@ const OperationalFundForm = ({ accountKey, categories, fund, onSave, onCancel, s
           <Stack spacing={4}>
             <HStack align="start">
               <FormControl isRequired>
-                <FormLabel>Initial Balance</FormLabel>
+                <FormLabel>Opening Balance</FormLabel>
                 <NumberInput min={0} precision={2} value={dollars(value.initialBalanceCents)} onChange={amount => set('initialBalanceCents', cents(amount) ?? 0)}>
                   <NumberInputField />
                 </NumberInput>
@@ -238,9 +249,10 @@ const OperationalFundForm = ({ accountKey, categories, fund, onSave, onCancel, s
             <Switch isChecked={value.active} onChange={event => set('active', event.target.checked)} />
           </FormControl>
         </HStack>
+        {fund?.id && <ChakraText fontSize="sm" color="gray.500">Opening amounts describe how this fund started. Use Adjust / move money to record later deposits or withdrawals with a reason.</ChakraText>}
         <HStack justify="flex-end">
           <Button onClick={onCancel}>Cancel</Button>
-          <Button type="submit" colorScheme="blue" isLoading={saving}>{fund ? 'Save Changes' : 'Create Allocation'}</Button>
+          <Button type="submit" colorScheme="blue" isLoading={saving}>{fund?.id ? 'Save Changes' : 'Create Allocation'}</Button>
         </HStack>
       </Stack>
     </Box>

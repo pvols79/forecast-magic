@@ -88,3 +88,7 @@ export const clearRecurringSuggestions = async (accountKey, transactionIds = [])
 ).data;
 
 export const getApiErrorMessage = error => error.response?.data?.error || error.message || 'Unexpected error.';
+
+export const addFundAdjustment = async (id, adjustment) => (await api.post(`/funds/${id}/adjustments`, adjustment)).data.fund;
+
+export const getFundRegister = async id => (await api.get(`/funds/${id}/register`)).data.rows;

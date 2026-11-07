@@ -64,6 +64,8 @@ function App() {
   const [projection, setProjection] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [selectedFundId, setSelectedFundId] = useState(null);
+  const [activePage, setActivePage] = useState('forecast');
   const [fundRefresh, setFundRefresh] = useState(0);
   const [duplicateScanRequest, setDuplicateScanRequest] = useState(0);
   const { colorMode, toggleColorMode } = useColorMode();
@@ -295,7 +297,13 @@ function App() {
               )}
             </VStack>
 
-            {projection ? (
+            {isAdminView && authStatus?.isAdmin && <HStack role="navigation" aria-label="Main views">
+              <Button colorScheme={activePage === 'forecast' ? 'blue' : 'gray'} variant={activePage === 'forecast' ? 'solid' : 'ghost'} onClick={() => setActivePage('forecast')}>Forecast</Button>
+              <Button colorScheme={activePage === 'funds' ? 'blue' : 'gray'} variant={activePage === 'funds' ? 'solid' : 'ghost'} onClick={() => setActivePage('funds')}>Funds</Button>
+            </HStack>}
+            {activePage === 'funds' && isAdminView && authStatus?.isAdmin && selectedAccountId ? (
+              <OperationalFundsManager key={selectedAccountId} initialSelectedId={selectedFundId} accountKey={selectedAccountId} currentStates={projection?.operationalFunds} onChanged={() => setFundRefresh(value => value + 1)} />
+            ) : projection ? (
               <VStack spacing={4} w="100%" align="stretch">
                 {isAdminView && authStatus?.isAdmin && selectedAccount && (
                   <AdminMetrics openingBalance={projection.openingBalance} />
@@ -333,6 +341,8 @@ function App() {
                 {!isAdminView && <HouseholdFundSummaries funds={projection.operationalFunds} />}
                 {isAdminView && authStatus?.isAdmin && (
                   <OperationalFundsManager
+                    compact
+                    onOpenFunds={id => { setSelectedFundId(id || null); setActivePage('funds'); }}
                     accountKey={selectedAccountId}
                     currentStates={projection.operationalFunds}
                     onChanged={() => setFundRefresh(value => value + 1)}

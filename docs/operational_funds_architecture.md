@@ -97,3 +97,46 @@ Fund mutation and category endpoints require the signed Admin session. Household
 The production Node process serves the React build and REST API on one HTTP port. It opens SQLite, applies migrations, and serves `/api/health`.
 
 For Docker, mount `/data` persistently. An external NGINX server may proxy HTTPS to the container's HTTP port. The application does not terminate TLS.
+
+## Funds workspace, sub-funds, and adjustments
+
+Admin has a dedicated Funds view with a tabular overview, selected-fund summary,
+sub-fund table, and an inline activity register. The Forecast retains a compact
+Fund overview and Create Fund. Settings live in a drawer. The register can show
+current-period or all-time activity and filter to a child or the parent's own
+portion. All-time spending is read live from Lunch Money from Fund creation;
+allocation entries use recorded allocation history, not an invented historical
+bank ledger. Category mappings reflect the current Fund configuration.
+
+A Fund may have one level of children, in the same account. Children have their
+own funding policy, category mappings, optional occasion date, and explicit
+purchase-completion date. Spending is evidence for review, not proof that a gift
+has been completed. Occasion dates identify a particular occasion; advance the
+date and clear purchase completion when planning the next year.
+
+Existing parent balances remain unassigned money. Children add their remaining
+balances to the parent's displayed total. Forecast calculations still process
+each underlying balance once, then roll up presentation to the parent. Parent
+scheduled contributions enter the unassigned portion; child schedules contribute
+to their respective children. Disabling a parent removes its entire family from
+the forecast. Children must be moved or deleted before deleting a parent.
+
+Reserved and Sinking Funds accept dated signed adjustment entries with a reason.
+These do not create or modify Lunch Money transactions. Opening amounts remain
+separate. The Admin adjustment endpoint dates entries in the installation's time
+zone and rejects withdrawals above the Fund's own available balance. To partition
+an existing balance, create a child with zero opening balance and move money from
+the parent using a negative entry with a destination. Both entries are saved in
+one database transaction. To correct an entry, record an opposite adjustment.
+Scheduled balances with adjustments replay from opening so subsequent rollover
+and goal-capped contributions include the adjustment exactly once.
+
+- `GET /api/funds/:id/register` (Admin)
+- `POST /api/funds/:id/adjustments` (Admin), with `amountCents`, `note`, and optional
+  `transferToId` for a move within the same family.
+
+Sub-funds use `parent_id`; occasion and completion dates are optional metadata.
+`operational_fund_adjustments` stores immutable local register entries. Hidden
+children remain included in aggregate reserves but their transaction details are
+removed from Household responses. Child names and local adjustment reasons are
+not exposed in Household responses.

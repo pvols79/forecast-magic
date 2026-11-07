@@ -70,7 +70,13 @@ const annotateTransactions = (transactions, startingCents) => {
 };
 
 const stateForPeriod = (fund, period, allocationCents, carryInCents, transactions, throughDate, anchorDate) => {
-  const periodTransactions = transactionsForPeriod(fund, transactions, period, throughDate, anchorDate);
+  const periodTransactions = [
+    ...transactionsForPeriod(fund, transactions, period, throughDate, anchorDate),
+    ...(fund.adjustments || []).filter(entry => entry.date >= period.start && entry.date <= throughDate).map(entry => ({
+      transactionId: `adjustment:${entry.id}`, date: entry.date, description: entry.note,
+      amount: entry.amountCents / 100, type: 'adjustment', excluded: false,
+    })),
+  ].sort((a, b) => a.date.localeCompare(b.date) || (a.type === 'adjustment' ? -1 : b.type === 'adjustment' ? 1 : String(a.transactionId).localeCompare(String(b.transactionId))));
   const drawdown = annotateTransactions(periodTransactions, allocationCents + carryInCents);
   return {
     fundId: fund.id,
@@ -171,6 +177,10 @@ export const calculateCurrentFundState = (fund, checkpoint, transactions, anchor
 
 const publicFundState = (fund, state) => ({
   id: fund.id,
+  parentId: fund.parentId,
+  occasionDate: fund.occasionDate,
+  purchasedOn: fund.purchasedOn,
+  adjustments: fund.adjustments || [],
   accountKey: fund.accountKey,
   name: fund.name,
   fundType: fundTypeFor(fund),
@@ -268,6 +278,13 @@ export const projectOperationalFunds = ({ funds, checkpoints = new Map(), transa
             projectedReserveCents: fundState.projectedReserveCents - coveredCents + restoredCents,
           };
         }
+        const adjustmentCents = (fund.adjustments || []).filter(entry => entry.date === date).reduce((sum, entry) => sum + entry.amountCents, 0);
+        if (adjustmentCents) {
+          const balanceCents = fundState.balanceCents + adjustmentCents;
+          const remainingCents = Math.max(0, balanceCents);
+          fundState = { ...fundState, balanceCents, remainingCents,
+            projectedReserveCents: fundState.projectedReserveCents + remainingCents - fundState.remainingCents };
+        }
         runningFunds.set(fund.id, fundState);
       }
     }
@@ -296,4 +313,27 @@ export const projectOperationalFunds = ({ funds, checkpoints = new Map(), transa
     currentReservedCents: days[0]?.totalReservedCents || 0,
     days,
   };
+};
+
+// Reserve calculations use the flat funds once. Presentation rolls children into
+// their parent; the parent's own balance is the unassigned part of that total.
+export const rollUpFundProjection = (projection, funds) => {
+  const byId = new Map(funds.map(fund => [fund.id, fund]));
+  const rootId = id => byId.get(id)?.parentId || id;
+  const group = states => {
+    const roots = states.filter(state => !byId.get(state.id)?.parentId);
+    return roots.map(root => {
+      const children = states.filter(state => byId.get(state.id)?.parentId === root.id);
+      if (!children.length) return root;
+      const sum = key => [root, ...children].reduce((total, state) => total + (state[key] || 0), 0);
+      return { ...root, children, ownRemainingCents: root.remainingCents,
+        remainingCents: sum('remainingCents'), projectedReserveCents: sum('projectedReserveCents'),
+        transactions: [root, ...children].flatMap(state => (state.transactions || []).map(row => ({ ...row, fundId: state.id, subFundName: state.id === root.id ? 'Unassigned' : state.name }))).sort((a, b) => a.date.localeCompare(b.date)),
+      };
+    });
+  };
+  const annotations = rows => rows.map(row => ({ ...row, fundId: rootId(row.fundId), name: byId.get(rootId(row.fundId))?.name || row.name }));
+  return { ...projection, currentFunds: group(projection.currentFunds), days: projection.days.map(day => ({ ...day,
+    funds: group(day.funds), boundaryAnnotations: annotations(day.boundaryAnnotations), transactionDrawdowns: annotations(day.transactionDrawdowns),
+  })) };
 };

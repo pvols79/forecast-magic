@@ -141,3 +141,43 @@ describe('OperationalFundRepository', () => {
     expect(getDatabase().prepare('SELECT COUNT(*) AS count FROM operational_fund_current_state').get().count).toBe(1);
   });
 });
+
+describe('Fund workspace', () => {
+  it('rolls up child balances once and keeps moves as balanced register entries', async () => {
+    const parent = repository.create(fund({ name: 'Birthdays', fundType: 'reserved', allocationCents: 25000, categoryIds: [], createdOn: '2026-08-01' }));
+    const child = repository.create(fund({ name: 'Alex', parentId: parent.id, fundType: 'sinking', allocationMode: 'manual', initialBalanceCents: 0, categoryIds: [11], createdOn: '2026-08-01', occasionDate: '2026-08-20' }));
+    repository.addAdjustment(parent.id, { date: '2026-08-10', amountCents: -10000, note: 'Birthday envelope', transferToId: child.id });
+    const service = new OperationalFundService(repository, { getTransactions: async () => [{ transactionId: 1, date: '2026-08-12', accountKey: 'plaid:1', categoryId: 11, amount: -40, type: 'actual', description: 'Gift' }, { transactionId: 2, date: '2026-08-14', accountKey: 'plaid:1', categoryId: 11, amount: -20, type: 'future', description: 'Upcoming gift' }] });
+    const projection = await service.getProjection('plaid:1', '2026-08-13', '2026-08-15');
+    expect(projection.currentFunds).toHaveLength(1);
+    expect(projection.currentReservedCents).toBe(21000);
+    expect(projection.currentFunds[0]).toMatchObject({ ownRemainingCents: 15000, remainingCents: 21000 });
+    expect(projection.currentFunds[0].children[0].remainingCents).toBe(6000);
+    expect(projection.days[2].totalReservedCents).toBe(19000);
+    expect(projection.days[1].transactionDrawdowns[0].fundId).toBe(parent.id);
+    expect(projection.days[2].funds).toHaveLength(1);
+    const rows = await service.getRegister(parent.id, '2026-08-13');
+    expect(rows.filter(row => row.type === 'adjustment').reduce((sum, row) => sum + row.amount, 0)).toBe(0);
+    expect(rows.find(row => row.transactionId === 1).fundId).toBe(child.id);
+    expect(repository.getById(parent.id).allocationCents).toBe(25000);
+    expect(() => repository.delete(parent.id)).toThrow(/sub-funds/);
+    expect(() => repository.create(fund({ parentId: child.id, categoryIds: [] }))).toThrow(/top-level/);
+    expect(() => repository.create(fund({ accountKey: 'plaid:2', parentId: parent.id, categoryIds: [] }))).toThrow(/same account/);
+    repository.update(parent.id, { active: false });
+    expect((await service.getProjection('plaid:1', '2026-08-13', '2026-08-15')).currentReservedCents).toBe(0);
+  });
+
+  it('replays dated adjustments across scheduled periods and survives repeated projections', async () => {
+    const saved = repository.create(fund({ fundType: 'sinking', initialBalanceCents: 10000, allocationCents: 1000, createdOn: '2026-08-10', categoryIds: [] }));
+    repository.addAdjustment(saved.id, { date: '2026-08-12', amountCents: 2500, note: 'Extra saving' });
+    const service = new OperationalFundService(repository, { getTransactions: async () => [] });
+    const first = await service.getProjection('plaid:1', '2026-08-25', '2026-08-31');
+    const second = await service.getProjection('plaid:1', '2026-08-25', '2026-08-31');
+    expect(first.currentReservedCents).toBe(14500);
+    expect(second.currentReservedCents).toBe(14500);
+    expect(first.days.at(-1).totalReservedCents).toBe(15500);
+    expect(repository.getById(saved.id).initialBalanceCents).toBe(10000);
+    expect(() => repository.addAdjustment(saved.id, { date: '2026-02-30', amountCents: 100, note: 'Bad date' })).toThrow(/valid/);
+    expect(() => repository.addAdjustment(saved.id, { date: '2026-08-12', amountCents: 0, note: 'Zero' })).toThrow(/nonzero/);
+  });
+});
