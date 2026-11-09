@@ -34,12 +34,18 @@ const drawDocumentHeader = (doc, report, context) => {
   const left = doc.page.margins.left;
   doc.fillColor(COLORS.blue).font('Helvetica-Bold').fontSize(22)
     .text('Forecast Magic', left, doc.y, { width: context.contentWidth });
-  doc.fillColor(COLORS.ink).fontSize(15).text('Daily Financial Highlight', left, doc.y, { continued: true });
+  doc.y += 4;
+  const subtitleY = doc.y;
+  doc.fillColor(COLORS.ink).fontSize(15)
+    .text('Daily Financial Highlight', left, subtitleY, { width: context.contentWidth - 125 });
   doc.fillColor(COLORS.muted).font('Helvetica').fontSize(9)
-    .text(`  |  ${titleCase(report.reportContext.view)} report`);
-  doc.moveDown(0.3);
+    .text(`${titleCase(report.reportContext.view)} report`, left + context.contentWidth - 120, subtitleY + 4,
+      { width: 120, align: 'right' });
+  doc.y = subtitleY + 24;
+  doc.x = left;
   doc.fontSize(9).fillColor(COLORS.muted)
     .text(`${report.account.name}  |  Report date ${report.reportDate}  |  ${report.reportContext.timezone}`);
+  doc.y += 3;
   doc.text(`Generated ${new Date(report.generatedAt).toLocaleString('en-US', { timeZone: report.reportContext.timezone })}`);
   doc.moveDown(0.7);
   doc.strokeColor(COLORS.blue).lineWidth(2)
@@ -51,7 +57,8 @@ const drawDocumentHeader = (doc, report, context) => {
 };
 
 const sectionTitle = (doc, context, title) => {
-  context.ensureSpace(30);
+  context.ensureSpace(65);
+  doc.y += 10;
   const left = doc.page.margins.left;
   const titleY = doc.y;
   doc.fillColor(COLORS.ink).font('Helvetica-Bold').fontSize(13)
@@ -184,12 +191,15 @@ const drawNeedsAttention = (doc, report, context) => {
   if (!items.length) {
     doc.fillColor(COLORS.muted).font('Helvetica').fontSize(9)
       .text('No unpaid Upcoming expenses are past due or due within 48 hours.', doc.page.margins.left, doc.y, { width: context.contentWidth });
+    doc.y += 12;
     return;
   }
   drawAttentionRows(doc, items, context);
+  doc.y += 8;
 };
 
 const drawSpendingTrends = (doc, report, context) => {
+  context.ensureSpace(155);
   sectionTitle(doc, context, 'Spending Trends');
   const left = doc.page.margins.left;
   doc.fillColor(COLORS.muted).font('Helvetica').fontSize(8)
@@ -200,14 +210,17 @@ const drawSpendingTrends = (doc, report, context) => {
       { width: context.contentWidth }
     );
   doc.moveDown(0.4);
-  const top = report.spendingTrends.topCategories || [];
+  doc.fillColor(COLORS.ink).font('Helvetica-Bold').fontSize(10)
+    .text('Top 5 Spending Categories', left, doc.y, { width: context.contentWidth });
+  doc.y += 6;
+  const top = (report.spendingTrends.topCategories || []).slice(0, 5);
   top.forEach((category, index) => {
     context.ensureSpace(18);
     const rowY = doc.y;
-    doc.fillColor(COLORS.ink).font(index < 3 ? 'Helvetica-Bold' : 'Helvetica').fontSize(9)
+    doc.fillColor(COLORS.ink).font('Helvetica-Bold').fontSize(9)
       .text(`${index + 1}. ${category.categoryName}`, left, rowY, { width: 210 });
     doc.font('Helvetica').text(
-      `${context.money(category.amountCents)}  |  ${category.transactionCount} transactions`,
+      `${context.money(category.amountCents)}  |  ${category.transactionCount} transaction${category.transactionCount === 1 ? '' : 's'}`,
       left + 220,
       rowY,
       { width: context.contentWidth - 220 }

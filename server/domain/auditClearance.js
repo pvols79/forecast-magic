@@ -27,3 +27,25 @@ export const applyAuditClearance = (transaction, entries) => {
     },
   };
 };
+
+
+// Report the complete account register, independently of transaction pagination.
+// Entries outside the query are retained without claiming their current validity.
+export const buildClearanceRegister = (entries, transactions, { startDate, endDate }) => {
+  const byId = new Map(transactions.map(transaction => [transaction.transactionId, transaction]));
+  return entries.map(entry => {
+    const transaction = byId.get(entry.transactionId);
+    const outsideRange = entry.snapshot.date < startDate || entry.snapshot.date > endDate;
+    const status = entry.revokedAt ? 'revoked'
+      : transaction?.clearanceNeedsReview ? 'needs_review'
+        : transaction?.auditClearance ? 'applied'
+          : outsideRange ? 'outside_query_range' : 'transaction_not_found';
+    return {
+      accountKey: entry.accountKey, transactionId: entry.transactionId,
+      date: entry.snapshot.date, payee: transaction?.payee || entry.snapshot.payee,
+      amountCents: entry.snapshot.amountCents, source: entry.snapshot.source,
+      reason: entry.reason, verifiedAt: entry.verifiedAt, revokedAt: entry.revokedAt,
+      status,
+    };
+  });
+};

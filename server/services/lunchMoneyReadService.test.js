@@ -66,6 +66,27 @@ describe('Live Lunch Money audit reads', () => {
     expect(second.transactions[0].balanceTreatment).not.toBe('unreflected');
   });
 
+  it('includes the complete register on every page, with applied and exception statuses', async () => {
+    const { service } = setup();
+    const entry = (id, date = '2026-09-30', extra = {}) => ({
+      accountKey: 'plaid:1', transactionId: String(id), reason: 'Verified bank evidence',
+      verifiedAt: '2026-10-01T12:00:00Z',
+      snapshot: { date, amountCents: -2000, source: 'api', payee: 'Retained payment' }, ...extra,
+    });
+    service.clearances = { list: () => [entry(1), entry(2, '2026-10-02'),
+      entry(8, '2026-09-30', { revokedAt: '2026-10-02T12:00:00Z' }),
+      entry(9, '2026-08-01'), entry(10)] };
+    const first = await service.getTransactions({ ...query, limit: 1 });
+    const second = await service.getTransactions({ ...query, limit: 1, offset: 1 });
+    expect(first.clearanceRegister).toEqual(second.clearanceRegister);
+    expect(first.clearanceRegister.map(entry => [entry.transactionId, entry.status])).toEqual([
+      ['1', 'applied'], ['2', 'needs_review'], ['8', 'revoked'],
+      ['9', 'outside_query_range'], ['10', 'transaction_not_found'],
+    ]);
+    expect(first.clearanceRegister[0]).toMatchObject({ amountCents: -2000,
+      reason: 'Verified bank evidence', verifiedAt: '2026-10-01T12:00:00Z' });
+  });
+
   it('rejects invalid ranges and pagination before querying LM', async () => {
     const { service, lunchMoney } = setup();
     for (const changes of [{ startDate: '2026-02-30' }, { endDate: '2025-01-01' }, { offset: -1 }, { limit: 501 }, { paddingDays: 6 }]) {

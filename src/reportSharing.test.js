@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { printPdf, reportRequest, shareOrDownloadPdf } from './reportSharing.js';
+import { downloadPdf, printPdf, reportRequest, shareOrDownloadPdf } from './reportSharing.js';
 
 describe('report sharing', () => {
   it('uses the currently selected account and active report view', () => {
@@ -27,6 +27,7 @@ describe('report sharing', () => {
       { blob: new Blob(['pdf'], { type: 'application/pdf' }), filename: 'report.pdf' },
       {
         navigatorObject: {},
+        schedule: callback => callback(),
         documentObject: { createElement: () => link, body: { appendChild } },
         urlObject: { createObjectURL: () => 'blob:report', revokeObjectURL },
       }
@@ -59,4 +60,41 @@ describe('report sharing', () => {
     expect(remove).toHaveBeenCalledOnce();
     expect(revokeObjectURL).toHaveBeenCalledWith('blob:print-report');
   });
+  it('opens the folder picker before fetching and saves without invoking share', async () => {
+    const order = [];
+    const blob = new Blob(['pdf'], { type: 'application/pdf' });
+    const writable = { write: vi.fn(async () => {}), close: vi.fn(async () => {}) };
+    const share = vi.fn();
+    const result = await downloadPdf({ filename: 'report.pdf', getFile: async () => {
+      order.push('fetch'); return { blob, filename: 'report.pdf' };
+    } }, { showSaveFilePicker: async options => {
+      order.push('picker'); expect(options.suggestedName).toBe('report.pdf');
+      return { createWritable: async () => writable };
+    }, navigatorObject: { share, canShare: () => true } });
+    expect(order).toEqual(['picker', 'fetch']);
+    expect(result).toBe('saved');
+    expect(writable.write).toHaveBeenCalledWith(blob);
+    expect(writable.close).toHaveBeenCalledOnce();
+    expect(share).not.toHaveBeenCalled();
+  });
+
+  it('does not fetch or download when the save picker is cancelled', async () => {
+    const getFile = vi.fn();
+    const error = Object.assign(new Error('Cancelled'), { name: 'AbortError' });
+    await expect(downloadPdf({ filename: 'report.pdf', getFile }, {
+      showSaveFilePicker: async () => { throw error; },
+    })).rejects.toBe(error);
+    expect(getFile).not.toHaveBeenCalled();
+  });
+
+  it('aborts a failed save and preserves the write error', async () => {
+    const error = new Error('Disk full');
+    const writable = { write: vi.fn(async () => { throw error; }), abort: vi.fn(async () => {}), close: vi.fn() };
+    await expect(downloadPdf({ filename: 'report.pdf', blob: new Blob(['pdf']) }, {
+      showSaveFilePicker: async () => ({ createWritable: async () => writable }),
+    })).rejects.toBe(error);
+    expect(writable.abort).toHaveBeenCalledOnce();
+    expect(writable.close).not.toHaveBeenCalled();
+  });
+
 });

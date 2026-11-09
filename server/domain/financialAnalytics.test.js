@@ -91,10 +91,19 @@ describe('Financial analytics', () => {
     ], categories, 'plaid:1', '2026-08-14');
 
     expect(result.currentWindow).toEqual({ startDate: '2026-07-16', endDate: '2026-08-14' });
-    expect(result.topCategories.map(item => item.categoryName)).toEqual(['Shopping', 'Groceries', 'Restaurants']);
+    expect(result.topCategories.map(item => item.categoryName)).toEqual(['Shopping', 'Groceries', 'Restaurants', 'Auto Fuel']);
     expect(result.tracked.gas).toMatchObject({ currentCents: 10000, previousCents: 5000, direction: 'up' });
     expect(result.tracked.dining).toMatchObject({ currentCents: 20000, previousCents: 25000, direction: 'down' });
     expect(result.tracked.groceries).toMatchObject({ currentCents: 30000, previousCents: 0, direction: 'new' });
+  });
+
+  it('returns the five highest spending categories, excluding the sixth and transfers', () => {
+    const categoryList = [...categories, { id: 6, name: 'Utilities' }, { id: 7, name: 'Home' }];
+    const result = summarizeSpendingTrends([1, 2, 3, 4, 5, 6, 7].map(id =>
+      transaction({ transactionId: id, categoryId: id, amount: -id * 100 })),
+    categoryList, 'plaid:1', '2026-08-14');
+    expect(result.topCategories.map(category => category.categoryName))
+      .toEqual(['Home', 'Utilities', 'Shopping', 'Groceries', 'Restaurants']);
   });
 
   it('defines unallocated spending as neither Fund-mapped nor recurring', () => {

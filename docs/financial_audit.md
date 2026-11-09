@@ -459,3 +459,16 @@ evidence reason. The service refreshes the LM transaction and records a fingerpr
 of its date, amount, source, account and ID. Revocation is reversible. A changed
 snapshot stops the override. Use this only for explicitly confirmed retained
 replacements, not ordinary bank/Plaid settlement delays.
+
+
+### Clearance register in every audit report
+
+Live reconciliation pages and saved/compact audit responses include `clearanceRegister`
+for the complete account, independently of transaction pagination. Every report must
+show a **Verified clearance register** section, including an explicit empty result.
+List the transaction ID, date, payee, signed amount, evidence reason, verification
+time and status. Statuses are `applied`, `revoked`, `needs_review`,
+`outside_query_range`, or `transaction_not_found`. Outside-range entries are listed
+for transparency; their current validity was not assessed. Revoked, missing or
+changed transactions do not receive a settlement override. Existing saved audits
+remain historical; refresh live data for current register status.

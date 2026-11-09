@@ -5,8 +5,6 @@ export const reportRequest = (accountKey, view) => ({
 
 export const shareOrDownloadPdf = async ({ blob, filename }, environment = {}) => {
   const navigatorObject = environment.navigatorObject || globalThis.navigator;
-  const documentObject = environment.documentObject || globalThis.document;
-  const urlObject = environment.urlObject || globalThis.URL;
   const file = new File([blob], filename, { type: 'application/pdf' });
 
   if (navigatorObject?.share && navigatorObject.canShare?.({ files: [file] })) {
@@ -18,15 +16,42 @@ export const shareOrDownloadPdf = async ({ blob, filename }, environment = {}) =
     return 'shared';
   }
 
-  const url = urlObject.createObjectURL(blob);
+  return downloadPdf({ blob, filename }, { ...environment, skipSavePicker: true });
+};
+
+// Open the picker before fetching: browsers require a live user gesture.
+export const downloadPdf = async ({ blob, filename, getFile }, environment = {}) => {
+  const picker = environment.skipSavePicker ? null
+    : environment.showSaveFilePicker || globalThis.showSaveFilePicker?.bind(globalThis);
+  if (picker) {
+    const handle = await picker({
+      suggestedName: filename,
+      types: [{ description: 'PDF report', accept: { 'application/pdf': ['.pdf'] } }],
+    });
+    const report = getFile ? await getFile() : { blob };
+    const writable = await handle.createWritable();
+    try {
+      await writable.write(report.blob);
+      await writable.close();
+    } catch (error) {
+      try { await writable.abort?.(); } catch { /* Preserve the original save error. */ }
+      throw error;
+    }
+    return 'saved';
+  }
+  const report = getFile ? await getFile() : { blob, filename };
+  const documentObject = environment.documentObject || globalThis.document;
+  const urlObject = environment.urlObject || globalThis.URL;
+  const url = urlObject.createObjectURL(report.blob);
   const link = documentObject.createElement('a');
   link.href = url;
-  link.download = filename;
+  link.download = report.filename || filename;
   link.rel = 'noopener';
   documentObject.body.appendChild(link);
   link.click();
   link.remove();
-  urlObject.revokeObjectURL(url);
+  const schedule = environment.schedule || globalThis.setTimeout;
+  schedule(() => urlObject.revokeObjectURL(url), 1000);
   return 'downloaded';
 };
 

@@ -287,4 +287,18 @@ describe('FinancialAuditService', () => {
     expect(result.findings.some(item => item.key === 'missing-import-90')).toBe(false);
   });
 
+  it('includes the account clearance register in saved and compact audit responses', async () => {
+    const entry = { accountKey: 'plaid:1', transactionId: '12', verifiedAt: '2026-09-06T12:00:00Z',
+      reason: 'Retained replacement verified against bank row',
+      snapshot: { date: '2026-09-05', amountCents: -2500, source: 'api', payee: 'Tagged alert' } };
+    const service = new FinancialAuditService({ repository, lunchMoney, analytics, duplicateReview,
+      clearances: { list: () => [entry] } });
+    const saved = await service.run('plaid:1', '2026-09-06');
+    expect(saved.summary.facts.clearanceRegister).toEqual([
+      expect.objectContaining({ transactionId: '12', amountCents: -2500, status: 'applied', reason: entry.reason }),
+    ]);
+    const compact = await service.runCompactAudit({ accountKey: 'plaid:1', anchorDate: '2026-09-06' });
+    expect(compact.clearanceRegister).toEqual(saved.summary.facts.clearanceRegister);
+  });
+
 });

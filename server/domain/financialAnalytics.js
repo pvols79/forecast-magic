@@ -192,7 +192,7 @@ export const summarizeSpendingTrends = (transactions, categories, accountKey, an
   return {
     currentWindow: { startDate: currentStart, endDate: anchorDate },
     previousWindow: { startDate: previousStart, endDate: previousEnd },
-    topCategories: groupCategorySpending(currentTransactions, categoriesById).slice(0, 3),
+    topCategories: groupCategorySpending(currentTransactions, categoriesById).slice(0, 5),
     tracked: {
       gas: categoryTrend('gas', categories, currentTransactions, previousTransactions),
       dining: categoryTrend('dining', categories, currentTransactions, previousTransactions),

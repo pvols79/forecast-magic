@@ -1,5 +1,5 @@
 import { AuditClearanceRepository } from '../repositories/auditClearanceRepository.js';
-import { applyAuditClearance } from '../domain/auditClearance.js';
+import { applyAuditClearance, buildClearanceRegister } from '../domain/auditClearance.js';
 import {
   assessAuditHealth, buildBalanceBridge,
   findTagComplianceIssues, matchExternalTransactions,
@@ -353,6 +353,7 @@ export class FinancialAuditService {
         balanceBridge: bridge,
         balanceAssumption,
         reconciliationSections,
+        clearanceRegister: buildClearanceRegister(clearances, transactions, { startDate: queryStartDate, endDate: queryEndDate }),
         tagCompliance: {
           untaggedN8nCandidateCount: compliance.untaggedN8nCandidates.length,
         },
@@ -473,6 +474,7 @@ export class FinancialAuditService {
         spendablePosition: run.summary.facts.spendablePosition,
       },
       reconciliationSections: run.summary.facts.reconciliationSections,
+      clearanceRegister: run.summary.facts.clearanceRegister || [],
       unexplainedDifferences: {
         availableBalanceCents: run.summary.facts.balanceBridge.unexplainedAvailableDifferenceCents,
       },
