@@ -92,3 +92,6 @@ export const getApiErrorMessage = error => error.response?.data?.error || error.
 export const addFundAdjustment = async (id, adjustment) => (await api.post(`/funds/${id}/adjustments`, adjustment)).data.fund;
 
 export const getFundRegister = async id => (await api.get(`/funds/${id}/register`)).data.rows;
+
+export const archiveOperationalFund = async id => (await api.post(`/funds/${id}/archive`)).data.fund;
+export const restoreOperationalFund = async id => (await api.post(`/funds/${id}/restore`)).data.fund;

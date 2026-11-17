@@ -181,3 +181,59 @@ describe('Fund workspace', () => {
     expect(() => repository.addAdjustment(saved.id, { date: '2026-08-12', amountCents: 0, note: 'Zero' })).toThrow(/nonzero/);
   });
 });
+
+it('moves money across fund families on one bank account while rejecting invalid destinations', async () => {
+  const source = repository.create(fund({ name: 'Vacation', fundType: 'reserved', allocationCents: 20000, categoryIds: [], createdOn: '2026-08-01' }));
+  const destination = repository.create(fund({ name: 'Christmas', fundType: 'sinking', allocationMode: 'manual', initialBalanceCents: 0, categoryIds: [], createdOn: '2026-08-01' }));
+  const child = repository.create(fund({ name: 'Stockings', parentId: destination.id, fundType: 'sinking', allocationMode: 'manual', initialBalanceCents: 0, categoryIds: [], createdOn: '2026-08-01' }));
+  const move = transferToId => ({ date: '2026-08-13', amountCents: -2500, note: 'Reallocate savings', transferToId });
+  repository.addAdjustment(source.id, move(destination.id));
+  repository.addAdjustment(source.id, move(child.id));
+  const service = new OperationalFundService(repository, { getTransactions: async () => [] });
+  const projection = await service.getProjection('plaid:1', '2026-08-13', '2026-08-15');
+  expect(projection.currentReservedCents).toBe(20000);
+  expect(projection.currentFunds.find(f => f.id === source.id).remainingCents).toBe(15000);
+  expect(projection.currentFunds.find(f => f.id === destination.id).remainingCents).toBe(5000);
+  const elsewhere = repository.create(fund({ accountKey: 'plaid:2', fundType: 'reserved', categoryIds: [], createdOn: '2026-08-01' }));
+  expect(() => repository.addAdjustment(source.id, move(elsewhere.id))).toThrow(/same bank account/);
+  expect(() => repository.addAdjustment(source.id, move(source.id))).toThrow(/same bank account/);
+  repository.update(destination.id, { active: false });
+  expect(() => repository.addAdjustment(source.id, move(child.id))).toThrow(/active/);
+  expect(repository.getById(source.id).adjustments).toHaveLength(2);
+});
+
+it('archives a family without deleting history and restores its prior active states', async () => {
+  const parent = repository.create(fund({ name: 'Wedding', fundType: 'reserved', categoryIds: [], allocationCents: 20000, createdOn: '2026-08-01' }));
+  const child = repository.create(fund({ name: 'Flowers', parentId: parent.id, fundType: 'reserved', categoryIds: [12], allocationCents: 3000, createdOn: '2026-08-01' }));
+  const disabled = repository.create(fund({ name: 'Disabled child', parentId: parent.id, active: false, categoryIds: [], createdOn: '2026-08-01' }));
+  repository.addAdjustment(parent.id, { date: '2026-08-12', amountCents: 500, note: 'Extra saving' });
+  const service = new OperationalFundService(repository, { getTransactions: async () => [
+    { transactionId: 3, accountKey: 'plaid:1', categoryId: 12, date: '2026-08-12', amount: -10, type: 'actual' },
+    { transactionId: 4, accountKey: 'plaid:1', categoryId: 12, date: '2026-08-15', amount: -10, type: 'actual' },
+  ] });
+  const before = await service.getProjection('plaid:1', '2026-08-13', '2026-08-13');
+  repository.archive(parent.id, new Map([[parent.id, before.currentReservedCents], [child.id, 2000]]), '2026-08-13');
+  expect(repository.getById(parent.id)).toMatchObject({ active: false, archivedRemainingCents: 22500 });
+  expect(repository.getById(child.id).archivedWithParentId).toBe(parent.id);
+  expect(repository.getById(parent.id).adjustments).toHaveLength(1);
+  expect((await service.getProjection('plaid:1', '2026-08-16', '2026-08-16')).currentReservedCents).toBe(0);
+  const history = await service.getRegister(parent.id, '2026-08-16');
+  expect(history.some(row => row.transactionId === 3)).toBe(true);
+  expect(history.some(row => row.transactionId === 4)).toBe(false);
+  expect(() => repository.update(parent.id, { active: true })).toThrow(/Restore/);
+  expect(() => repository.restore(child.id)).toThrow(/parent/);
+  repository.restore(parent.id);
+  expect(repository.getById(parent.id)).toMatchObject({ active: true, archivedAt: null });
+  expect(repository.getById(child.id).active).toBe(true);
+  expect(repository.getById(disabled.id).active).toBe(false);
+});
+
+it('keeps an archived fund archived if its category was reused', () => {
+  const original = repository.create(fund({ name: 'Old holiday', categoryIds: [10] }));
+  repository.archive(original.id);
+  const replacement = repository.create(fund({ name: 'New holiday', categoryIds: [10] }));
+  expect(() => repository.restore(original.id)).toThrow(/New holiday/);
+  expect(repository.getById(original.id).archivedAt).toBeTruthy();
+  expect(repository.getById(original.id).active).toBe(false);
+  expect(repository.getById(replacement.id).active).toBe(true);
+});

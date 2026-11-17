@@ -96,6 +96,22 @@ export const createOperationalFundRouter = (
     return response.json({ fund });
   });
 
+  router.post('/:id/archive', requireAdmin, async (request, response) => {
+    const id = Number(request.params.id);
+    const existing = repository.getById(id);
+    if (!existing) return response.status(404).json({ error: 'Fund Allocation not found.' });
+    const today = getDateInTimezone(new Date(), settings.get('timezone') || 'UTC');
+    const projection = await service.getProjection(existing.accountKey, today, today);
+    const balances = new Map(projection.currentFunds.flatMap(fund => [fund, ...(fund.children || [])]).map(fund => [fund.id, fund.remainingCents]));
+    return response.json({ fund: repository.archive(id, balances, today) });
+  });
+
+  router.post('/:id/restore', requireAdmin, (request, response) => {
+    const fund = repository.restore(Number(request.params.id));
+    if (!fund) return response.status(404).json({ error: 'Fund Allocation not found.' });
+    return response.json({ fund });
+  });
+
   router.delete('/:id', requireAdmin, (request, response) => {
     if (!repository.delete(Number(request.params.id))) return response.status(404).json({ error: 'Fund Allocation not found.' });
     return response.status(204).end();

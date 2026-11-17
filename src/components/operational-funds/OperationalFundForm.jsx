@@ -94,7 +94,7 @@ const OperationalFundForm = ({ accountKey, categories, funds = [], fund, onSave,
           <FormLabel>Parent fund</FormLabel>
           <Select value={value.parentId || ''} onChange={event => set('parentId', event.target.value ? Number(event.target.value) : null)}>
             <option value="">None — top-level fund</option>
-            {funds.filter(item => !item.parentId && item.id !== value.id).map(item => <option value={item.id} key={item.id}>{item.name}</option>)}
+            {funds.filter(item => !item.parentId && !item.archivedAt && item.id !== value.id).map(item => <option value={item.id} key={item.id}>{item.name}</option>)}
           </Select>
         </FormControl>}
         <HStack align="start">

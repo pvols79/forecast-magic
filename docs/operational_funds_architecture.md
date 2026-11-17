@@ -133,10 +133,32 @@ and goal-capped contributions include the adjustment exactly once.
 
 - `GET /api/funds/:id/register` (Admin)
 - `POST /api/funds/:id/adjustments` (Admin), with `amountCents`, `note`, and optional
-  `transferToId` for a move within the same family.
+  `transferToId` for a move between active Reserved or Sinking Funds on the same bank account, including other parent Funds and their sub-funds.
 
 Sub-funds use `parent_id`; occasion and completion dates are optional metadata.
 `operational_fund_adjustments` stores immutable local register entries. Hidden
 children remain included in aggregate reserves but their transaction details are
 removed from Household responses. Child names and local adjustment reasons are
 not exposed in Household responses.
+
+## Archiving
+
+Archive hides a Fund from the current list and stops its reservation and scheduled
+contributions without deleting settings, category mappings, exclusions, allocations,
+or adjustment history. Parent archiving includes nonarchived children and preserves
+which ones were enabled. The Archived funds view shows the last reserved balance
+as a historical snapshot, not an amount still being held. Move money to another
+Fund first if that reservation should continue. Deleting also releases the reserve,
+but permanently removes the local Fund records; neither action moves bank money
+or removes Lunch Money transactions.
+
+Archive records its cutoff date using the installation time zone. Its register
+omits later category activity. Spending remains a live read of Lunch Money, rather
+than a frozen copy of bank records. Restore re-enables previously enabled members
+and resumes normal balance calculation against current categories and schedules;
+it rejects conflicts with categories reused by another enabled Fund. Separately
+archived children are not restored with their parent. Archived Funds cannot have
+settings, balance entries, or exclusions changed until restored.
+
+- `POST /api/funds/:id/archive` (Admin)
+- `POST /api/funds/:id/restore` (Admin)

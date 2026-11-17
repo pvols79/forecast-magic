@@ -13,6 +13,10 @@ const hydrateFund = (db, row) => {
 
   return {
     id: Number(row.id),
+    archivedAt: row.archived_at,
+    archivedOn: row.archived_on,
+    archivedWithParentId: row.archived_with_parent_id == null ? null : Number(row.archived_with_parent_id),
+    archivedRemainingCents: row.archived_remaining_cents == null ? null : Number(row.archived_remaining_cents),
     parentId: row.parent_id == null ? null : Number(row.parent_id),
     occasionDate: row.occasion_date,
     purchasedOn: row.purchased_on,
@@ -137,7 +141,7 @@ export class OperationalFundRepository {
     const parentId = input.parentId == null || input.parentId === '' ? null : Number(input.parentId);
     if (parentId != null) {
       const parent = this.getById(parentId);
-      if (!parent || parent.parentId != null || parent.id === Number(id) || parent.accountKey !== input.accountKey) {
+      if (!parent || parent.archivedAt || parent.parentId != null || parent.id === Number(id) || parent.accountKey !== input.accountKey) {
         throw new Error('Choose a top-level parent Fund in the same account.');
       }
       if (id && this.listByAccount(input.accountKey).some(fund => fund.parentId === Number(id))) throw new Error('A Fund with sub-funds cannot become a sub-fund.');
@@ -188,6 +192,7 @@ export class OperationalFundRepository {
   update(id, input) {
     const existing = this.getById(id);
     if (!existing) return null;
+    if (existing.archivedAt) throw new Error('Restore this Fund before editing its settings.');
     const fund = normalizeInput({ ...existing, ...input });
     validateInput(fund);
     const metadata = { ...existing, ...input, accountKey: fund.accountKey };
@@ -240,6 +245,39 @@ export class OperationalFundRepository {
     });
   }
 
+  archive(id, balances = new Map(), archiveDate = new Date().toISOString().slice(0, 10)) {
+    const existing = this.getById(id);
+    if (!existing || existing.archivedAt) return existing;
+    return withTransaction(db => {
+      const now = new Date().toISOString();
+      const members = [existing, ...this.listByAccount(existing.accountKey).filter(fund => fund.parentId === existing.id && !fund.archivedAt)];
+      const statement = db.prepare(`UPDATE operational_funds SET archived_at = ?, archived_on = ?, archived_was_active = active,
+        active = 0, archived_with_parent_id = ?, archived_remaining_cents = ?, updated_at = ? WHERE id = ?`);
+      for (const member of members) statement.run(now, archiveDate, member.id === existing.id ? null : existing.id,
+        balances.get(member.id) ?? this.getCurrentState(member.id)?.remainingCents ?? 0, now, member.id);
+      return this.getById(id);
+    });
+  }
+
+  restore(id) {
+    const existing = this.getById(id);
+    if (!existing || !existing.archivedAt) return existing;
+    if (existing.parentId && this.getById(existing.parentId)?.archivedAt) throw new Error('Restore the parent Fund first.');
+    return withTransaction(db => {
+      const rows = db.prepare('SELECT * FROM operational_funds WHERE id = ? OR archived_with_parent_id = ?').all(id, id);
+      for (const row of rows) {
+        if (!row.archived_was_active) continue;
+        const fund = hydrateFund(db, row);
+        const conflict = findCategoryConflict(db, fund.accountKey, fund.categoryIds, fund.id);
+        if (conflict) throw new Error(`Category ${conflict.category_id} is now assigned to ${conflict.fund_name}. Restore requires resolving this category conflict.`);
+      }
+      db.prepare(`UPDATE operational_funds SET active = COALESCE(archived_was_active, 1), archived_at = NULL, archived_on = NULL,
+        archived_was_active = NULL, archived_with_parent_id = NULL, archived_remaining_cents = NULL, updated_at = ?
+        WHERE id = ? OR archived_with_parent_id = ?`).run(new Date().toISOString(), id, id);
+      return this.getById(id);
+    });
+  }
+
   delete(id) {
     if (getDatabase().prepare('SELECT id FROM operational_funds WHERE parent_id = ? LIMIT 1').get(id)) throw new Error('Move or delete sub-funds before deleting their parent.');
     return getDatabase().prepare('DELETE FROM operational_funds WHERE id = ?').run(id).changes > 0;
@@ -248,6 +286,7 @@ export class OperationalFundRepository {
   addAdjustment(fundId, input) {
     const fund = this.getById(fundId);
     if (!fund) return null;
+    if (fund.archivedAt) throw new Error('Restore this Fund before adjusting its balance.');
     if (fund.fundType === 'operating') throw new Error('Balance adjustments are for Reserved and Sinking Funds.');
     const { date, amountCents, note } = input;
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date || '') || Number.isNaN(Date.parse(date)) || new Date(date).toISOString().slice(0, 10) !== date || date < fund.createdOn) throw new Error('Adjustment date must be valid and on or after the Fund opening date.');
@@ -255,7 +294,7 @@ export class OperationalFundRepository {
     let target = null;
     if (input.transferToId != null) {
       target = this.getById(Number(input.transferToId));
-      if (!target || target.id === fund.id || target.accountKey !== fund.accountKey || (target.parentId || target.id) !== (fund.parentId || fund.id) || target.fundType === 'operating' || !target.active || date < target.createdOn || amountCents >= 0) throw new Error('Moves require a negative amount and another active Reserved or Sinking Fund in the same family.');
+      if (!target || target.id === fund.id || target.accountKey !== fund.accountKey || target.fundType === 'operating' || !target.active || (target.parentId && !this.getById(target.parentId)?.active) || !fund.active || (fund.parentId && !this.getById(fund.parentId)?.active) || date < target.createdOn || amountCents >= 0) throw new Error('Moves require a negative amount and another active Reserved or Sinking Fund on the same bank account.');
     }
     return withTransaction(db => {
       if (target) {
@@ -341,6 +380,7 @@ export class OperationalFundRepository {
   }
 
   addExclusion(fundId, transactionId) {
+    if (this.getById(fundId)?.archivedAt) throw new Error('Restore this Fund before changing exclusions.');
     if (transactionId == null || transactionId === '') throw new Error('Transaction ID is required.');
     getDatabase().prepare(`
       INSERT OR IGNORE INTO operational_fund_exclusions (fund_id, transaction_id, created_at)
@@ -350,6 +390,7 @@ export class OperationalFundRepository {
   }
 
   removeExclusion(fundId, transactionId) {
+    if (this.getById(fundId)?.archivedAt) throw new Error('Restore this Fund before changing exclusions.');
     getDatabase().prepare(`
       DELETE FROM operational_fund_exclusions WHERE fund_id = ? AND transaction_id = ?
     `).run(fundId, String(transactionId));
