@@ -1,5 +1,6 @@
 import { getDatabase, withTransaction } from '../db/database.js';
-import { getDateInTimezone, getPeriodForDate } from '../domain/periods.js';
+import { getDateInTimezone } from '../domain/periods.js';
+import { isOpeningFundAllocation } from '../domain/operationalFunds.js';
 
 const toBoolean = value => Boolean(value);
 
@@ -398,7 +399,7 @@ export class OperationalFundRepository {
     if (fund.archivedAt) throw new Error('Restore this Fund before removing allocations.');
     const allocation = this.getAllocationHistory(fundId).find(entry => entry.periodStart === periodStart);
     if (!allocation) throw new Error('Allocation not found.');
-    if (fund.fundType === 'sinking' && periodStart === getPeriodForDate(fund, fund.createdOn).start) throw new Error('This entry is the opening balance, not an automatic allocation.');
+    if (isOpeningFundAllocation(fund, allocation)) throw new Error('This entry is the opening balance, not an automatic allocation.');
     return withTransaction(db => {
       db.prepare('INSERT OR IGNORE INTO operational_fund_allocation_removals (fund_id, period_start, removed_at) VALUES (?, ?, ?)').run(fundId, periodStart, new Date().toISOString());
       db.prepare('DELETE FROM operational_fund_current_state WHERE fund_id = ?').run(fundId);

@@ -311,3 +311,72 @@ it('recalculates operating-fund rollover after removing a recorded allocation', 
   repository.removeAllocation(saved.id, '2026-09-01');
   expect((await service.getProjection('plaid:1', '2026-10-15', '2026-10-15')).currentReservedCents).toBe(20000);
 });
+
+it('can remove old allocations while disabled and re-enable only future funding', async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date('2026-11-17T18:00:00Z'));
+  const saved = repository.create(fund({ name: 'Birthdays', fundType: 'sinking', allocationMode: 'scheduled', periodType: 'monthly', anchorDay: 1, initialBalanceCents: 10000, allocationCents: 5000, categoryIds: [], createdOn: '2026-08-14' }));
+  repository.addAdjustment(saved.id, { date: '2026-08-20', amountCents: 2500, note: 'Manual funding' });
+  const service = new OperationalFundService(repository, { getTransactions: async () => [] });
+  await service.getProjection('plaid:1', '2026-11-17', '2026-11-17');
+  repository.update(saved.id, { allocationMode: 'manual' });
+  let register = await service.getRegister(saved.id, '2026-11-17');
+  expect(register.filter(row => row.type === 'opening')).toHaveLength(1);
+  expect(register.find(row => row.periodStart === '2026-08-01')?.type).toBe('opening');
+  for (const date of ['2026-09-01', '2026-10-01', '2026-11-01']) repository.removeAllocation(saved.id, date);
+  expect((await service.getProjection('plaid:1', '2026-11-17', '2026-11-17')).currentReservedCents).toBe(12500);
+  repository.update(saved.id, { allocationMode: 'scheduled', periodType: 'monthly', anchorDay: 1, allocationCents: 5000 });
+  const reenabled = await service.getProjection('plaid:1', '2026-11-17', '2026-12-01');
+  expect(reenabled.currentReservedCents).toBe(12500);
+  expect(reenabled.days.at(-1).totalReservedCents).toBe(17500);
+  register = await service.getRegister(saved.id, '2026-11-17');
+  expect(register.filter(row => row.removed)).toHaveLength(3);
+  expect(register.filter(row => row.type === 'opening')).toHaveLength(1);
+});
+
+it.each([
+  { anchorDay: 1, removedDate: '2026-11-01', nextDate: '2026-12-01' },
+  { anchorDay: 20, removedDate: '2026-10-20', nextDate: '2026-11-20' },
+])('records new funding on anchor day $anchorDay after an older occurrence was removed', async ({ anchorDay, removedDate, nextDate }) => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date('2026-11-17T18:00:00Z'));
+  const saved = repository.create(fund({ name: 'Birthdays', fundType: 'sinking', allocationMode: 'scheduled', periodType: 'monthly', anchorDay, initialBalanceCents: 10000, allocationCents: 5000, categoryIds: [], createdOn: '2026-08-14' }));
+  const service = new OperationalFundService(repository, { getTransactions: async () => [] });
+  await service.getProjection('plaid:1', '2026-11-17', '2026-11-17');
+  repository.removeAllocation(saved.id, removedDate);
+  const corrected = await service.getProjection('plaid:1', '2026-11-17', '2026-11-17');
+  repository.update(saved.id, { allocationMode: 'manual' });
+  repository.update(saved.id, { allocationMode: 'scheduled', periodType: 'monthly', anchorDay, allocationCents: 5000 });
+  closeDatabase();
+  configureDatabase(databasePath);
+  const scheduled = await service.getProjection('plaid:1', '2026-11-17', nextDate);
+  expect(scheduled.currentReservedCents).toBe(corrected.currentReservedCents);
+  expect(scheduled.days.at(-1).totalReservedCents).toBe(corrected.currentReservedCents + 5000);
+  // Advance to the real boundary: funding must be saved, not just projected.
+  vi.setSystemTime(new Date(`${nextDate}T18:00:00Z`));
+  for (let repeat = 0; repeat < 2; repeat++) {
+    const actual = await service.getProjection('plaid:1', nextDate, nextDate);
+    expect(actual.currentReservedCents).toBe(corrected.currentReservedCents + 5000);
+  }
+  const history = repository.getAllocationHistory(saved.id);
+  expect(history.find(row => row.periodStart === removedDate).removedAt).toBeTruthy();
+  expect(history.filter(row => row.periodStart === nextDate)).toHaveLength(1);
+  expect(history.find(row => row.periodStart === nextDate)).toMatchObject({ allocationCents: 5000, removedAt: null });
+  expect((await service.getRegister(saved.id, nextDate)).find(row => row.periodStart === nextDate)).toMatchObject({ type: 'allocation', removed: false, amount: 50 });
+});
+
+it('does not apply a removal from one year to the same monthly anchor in the following year', async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date('2026-11-17T18:00:00Z'));
+  const saved = repository.create(fund({ fundType: 'sinking', allocationMode: 'scheduled', periodType: 'monthly', anchorDay: 1, initialBalanceCents: 0, allocationCents: 1000, categoryIds: [], createdOn: '2026-08-01' }));
+  const service = new OperationalFundService(repository, { getTransactions: async () => [] });
+  await service.getProjection('plaid:1', '2026-11-17', '2026-11-17');
+  repository.removeAllocation(saved.id, '2026-11-01');
+  repository.update(saved.id, { allocationMode: 'manual' });
+  repository.update(saved.id, { allocationMode: 'scheduled', periodType: 'monthly', anchorDay: 1 });
+  vi.setSystemTime(new Date('2027-11-01T18:00:00Z'));
+  await service.getProjection('plaid:1', '2027-11-01', '2027-11-01');
+  const history = repository.getAllocationHistory(saved.id);
+  expect(history.find(row => row.periodStart === '2026-11-01').removedAt).toBeTruthy();
+  expect(history.find(row => row.periodStart === '2027-11-01')).toMatchObject({ allocationCents: 1000, removedAt: null });
+});

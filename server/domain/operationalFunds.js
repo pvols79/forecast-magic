@@ -3,6 +3,13 @@ import { addDays, getPeriodForDate } from './periods.js';
 const fundTypeFor = fund => fund.fundType || (fund.periodType === 'all-time' ? 'reserved' : 'operating');
 const allocationModeFor = fund => fund.allocationMode || (fundTypeFor(fund) === 'reserved' ? 'manual' : 'scheduled');
 
+// The original period may no longer match the Fund's current schedule after
+// disabling or editing it. Identify opening funding using its recorded bounds.
+export const isOpeningFundAllocation = (fund, allocation) => fundTypeFor(fund) === 'sinking'
+  && fund.createdOn >= allocation.periodStart
+  && fund.createdOn <= allocation.periodEnd;
+
+
 const isMappedTransaction = (fund, transaction, startDate, endDate, anchorDate) => {
   if (transaction.accountKey !== fund.accountKey) return false;
   if (fundTypeFor(fund) === 'sinking' && fund.createdOn && transaction.date < fund.createdOn) return false;

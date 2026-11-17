@@ -1,5 +1,5 @@
 import { getPeriodForDate } from '../domain/periods.js';
-import { projectOperationalFunds, rollUpFundProjection } from '../domain/operationalFunds.js';
+import { isOpeningFundAllocation, projectOperationalFunds, rollUpFundProjection } from '../domain/operationalFunds.js';
 import { OperationalFundRepository } from '../repositories/operationalFundRepository.js';
 import { LunchMoneyService } from './lunchMoneyService.js';
 
@@ -22,8 +22,7 @@ export class OperationalFundService {
     const transactions = await this.lunchMoneyService.getTransactions(start, throughDate, throughDate);
     return funds.flatMap(item => {
       const history = this.repository.getAllocationHistory(item.id);
-      const openingPeriod = getPeriodForDate(item, item.createdOn).start;
-      const isOpening = entry => item.fundType === 'sinking' && entry.periodStart === openingPeriod;
+      const isOpening = entry => isOpeningFundAllocation(item, entry);
       const hasRecordedOpening = history.some(isOpening);
       const cutoff = item.archivedOn || throughDate;
       return [
@@ -70,8 +69,9 @@ export class OperationalFundService {
         const firstRecorded = fund.recordedAllocationHistory.at(-1);
         const opening = getPeriodForDate(fund, fund.fundType === 'operating' ? firstRecorded?.periodStart || anchorDate : fund.createdOn);
         const recordedOpening = fund.recordedAllocationHistory.find(entry => entry.periodStart === opening.start);
+        const originalOpening = fund.recordedAllocationHistory.find(entry => isOpeningFundAllocation(fund, entry));
         checkpoint = { periodStart: opening.start,
-          allocationCents: recordedOpening?.allocationCents ?? (fund.fundType === 'sinking' ? fund.initialBalanceCents : fund.allocationCents),
+          allocationCents: (fund.fundType === 'sinking' ? originalOpening?.allocationCents : recordedOpening?.allocationCents) ?? (fund.fundType === 'sinking' ? fund.initialBalanceCents : fund.allocationCents),
           carryInCents: fund.fundType === 'operating' ? recordedOpening?.carryInCents || 0 : 0 };
       }
       if (checkpoint) checkpoints.set(fund.id, checkpoint);
