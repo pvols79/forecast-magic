@@ -1,4 +1,5 @@
 import { getDatabase, withTransaction } from '../db/database.js';
+import { getDateInTimezone, getPeriodForDate } from '../domain/periods.js';
 
 const toBoolean = value => Boolean(value);
 
@@ -25,6 +26,8 @@ const hydrateFund = (db, row) => {
     name: row.name,
     fundType: row.fund_type,
     allocationMode: row.allocation_mode,
+    scheduleStartedOn: row.schedule_started_on,
+    removedAllocationPeriods: db.prepare('SELECT period_start FROM operational_fund_allocation_removals WHERE fund_id = ?').all(row.id).map(entry => entry.period_start),
     allocationCents: Number(row.allocation_cents),
     initialBalanceCents: Number(row.initial_balance_cents),
     periodType: row.period_type,
@@ -228,6 +231,11 @@ export class OperationalFundRepository {
         new Date().toISOString(), id
       );
       db.prepare('UPDATE operational_funds SET parent_id = ?, occasion_date = ?, purchased_on = ? WHERE id = ?').run(parentId, metadata.occasionDate || null, metadata.purchasedOn || null, id);
+      if (existing.allocationMode !== 'scheduled' && fund.allocationMode === 'scheduled') {
+        const timezone = db.prepare("SELECT value FROM application_settings WHERE key = 'timezone'").get()?.value || 'UTC';
+        const startedOn = getDateInTimezone(new Date(), timezone);
+        db.prepare('UPDATE operational_funds SET schedule_started_on = ? WHERE id = ?').run(startedOn, id);
+      }
       replaceCategories(db, Number(id), fund.categoryIds);
       const periodConfigurationChanged =
         existing.accountKey !== fund.accountKey ||
@@ -358,7 +366,10 @@ export class OperationalFundRepository {
         VALUES (?, ?, ?, ?, ?)
         ON CONFLICT(fund_id, period_start) DO UPDATE SET
           period_end = excluded.period_end,
-          allocation_cents = excluded.allocation_cents,
+          allocation_cents = CASE WHEN EXISTS (
+            SELECT 1 FROM operational_fund_allocation_removals r
+            WHERE r.fund_id = excluded.fund_id AND r.period_start = excluded.period_start
+          ) THEN operational_fund_allocation_history.allocation_cents ELSE excluded.allocation_cents END,
           carry_in_cents = excluded.carry_in_cents
       `);
       for (const period of periods) insert.run(
@@ -369,14 +380,30 @@ export class OperationalFundRepository {
 
   getAllocationHistory(fundId) {
     return getDatabase().prepare(`
-      SELECT * FROM operational_fund_allocation_history
-      WHERE fund_id = ? ORDER BY period_start DESC
+      SELECT h.*, r.removed_at FROM operational_fund_allocation_history h
+      LEFT JOIN operational_fund_allocation_removals r ON r.fund_id = h.fund_id AND r.period_start = h.period_start
+      WHERE h.fund_id = ? ORDER BY h.period_start DESC
     `).all(fundId).map(row => ({
       periodStart: row.period_start,
       periodEnd: row.period_end,
       allocationCents: Number(row.allocation_cents),
       carryInCents: Number(row.carry_in_cents),
+      removedAt: row.removed_at || null,
     }));
+  }
+
+  removeAllocation(fundId, periodStart) {
+    const fund = this.getById(fundId);
+    if (!fund) return null;
+    if (fund.archivedAt) throw new Error('Restore this Fund before removing allocations.');
+    const allocation = this.getAllocationHistory(fundId).find(entry => entry.periodStart === periodStart);
+    if (!allocation) throw new Error('Allocation not found.');
+    if (fund.fundType === 'sinking' && periodStart === getPeriodForDate(fund, fund.createdOn).start) throw new Error('This entry is the opening balance, not an automatic allocation.');
+    return withTransaction(db => {
+      db.prepare('INSERT OR IGNORE INTO operational_fund_allocation_removals (fund_id, period_start, removed_at) VALUES (?, ?, ?)').run(fundId, periodStart, new Date().toISOString());
+      db.prepare('DELETE FROM operational_fund_current_state WHERE fund_id = ?').run(fundId);
+      return this.getById(fundId);
+    });
   }
 
   addExclusion(fundId, transactionId) {

@@ -5,6 +5,7 @@ const allocationModeFor = fund => fund.allocationMode || (fundTypeFor(fund) === 
 
 const isMappedTransaction = (fund, transaction, startDate, endDate, anchorDate) => {
   if (transaction.accountKey !== fund.accountKey) return false;
+  if (fundTypeFor(fund) === 'sinking' && fund.createdOn && transaction.date < fund.createdOn) return false;
   if (!fund.categoryIds.includes(Number(transaction.categoryId))) return false;
   if (transaction.amount === 0) return false;
   if (transaction.date < startDate || transaction.date > endDate) return false;
@@ -95,7 +96,13 @@ const initialPeriodAllocation = fund => fundTypeFor(fund) === 'sinking'
   ? fund.initialBalanceCents
   : fund.allocationCents;
 
-const contributionForBoundary = (fund, remainingCents) => {
+const contributionForBoundary = (fund, remainingCents, date, anchorDate) => {
+  if (fund.removedAllocationPeriods?.includes(date)) return 0;
+  // Saved past contributions are actual funding, not today's schedule applied
+  // retroactively. Keep their amounts when replaying spending or adjustments.
+  const recorded = date <= anchorDate && fund.recordedAllocationHistory?.find(entry => entry.periodStart === date);
+  if (recorded) return recorded.allocationCents;
+  if (fund.scheduleStartedOn && date <= fund.scheduleStartedOn) return 0;
   if (allocationModeFor(fund) !== 'scheduled') return 0;
   if (fundTypeFor(fund) !== 'sinking' || fund.targetCents == null) return fund.allocationCents;
   return Math.min(fund.allocationCents, Math.max(0, fund.targetCents - remainingCents));
@@ -105,7 +112,7 @@ export const calculateCurrentFundState = (fund, checkpoint, transactions, anchor
   const currentPeriod = getPeriodForDate(fund, anchorDate);
   const allocationHistory = [];
   const recordPeriod = state => {
-    if (allocationModeFor(fund) === 'scheduled' && fund.periodType !== 'all-time') {
+    if (allocationModeFor(fund) === 'scheduled' && fund.periodType !== 'all-time' && (!fund.scheduleStartedOn || state.periodStart > fund.scheduleStartedOn || fund.recordedAllocationHistory?.some(entry => entry.periodStart === state.periodStart))) {
       allocationHistory.push({
         periodStart: state.periodStart,
         periodEnd: state.periodEnd,
@@ -144,9 +151,10 @@ export const calculateCurrentFundState = (fund, checkpoint, transactions, anchor
   let state = stateForPeriod(
     fund,
     period,
-    period.start === currentPeriod.start && fundTypeFor(fund) === 'operating'
-      ? fund.allocationCents
-      : checkpoint.allocationCents,
+    fund.removedAllocationPeriods?.includes(period.start) ? 0
+      : period.start === currentPeriod.start && fundTypeFor(fund) === 'operating' && !fund.recordedAllocationHistory?.some(entry => entry.periodStart === period.start)
+        ? fund.allocationCents
+        : checkpoint.allocationCents,
     checkpoint.carryInCents,
     transactions,
     period.start === currentPeriod.start ? anchorDate : period.end,
@@ -159,7 +167,7 @@ export const calculateCurrentFundState = (fund, checkpoint, transactions, anchor
       ? state.remainingCents
       : getRolloverCarry(state.remainingCents, fund.rolloverMode, fund.rolloverCapCents);
     period = getPeriodForDate(fund, period.nextStart);
-    const allocationCents = contributionForBoundary(fund, carryInCents);
+    const allocationCents = contributionForBoundary(fund, carryInCents, period.start, anchorDate);
     state = stateForPeriod(
       fund,
       period,
@@ -185,6 +193,7 @@ const publicFundState = (fund, state) => ({
   name: fund.name,
   fundType: fundTypeFor(fund),
   allocationMode: allocationModeFor(fund),
+  scheduleStartedOn: fund.scheduleStartedOn,
   allocationCents: state.allocationCents,
   scheduledAllocationCents: fund.allocationCents,
   initialBalanceCents: fund.initialBalanceCents,
@@ -229,7 +238,7 @@ export const projectOperationalFunds = ({ funds, checkpoints = new Map(), transa
           const carryInCents = fundTypeFor(fund) === 'sinking'
             ? previousRemainingCents
             : getRolloverCarry(previousRemainingCents, fund.rolloverMode, fund.rolloverCapCents);
-          const allocationCents = contributionForBoundary(fund, carryInCents);
+          const allocationCents = contributionForBoundary(fund, carryInCents, date, anchorDate);
           const resultingRemainingCents = allocationCents + carryInCents;
           const projectedReserveCents = fundState.projectedReserveCents + allocationCents;
           const period = getPeriodForDate(fund, date);

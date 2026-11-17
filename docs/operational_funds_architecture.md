@@ -162,3 +162,28 @@ settings, balance entries, or exclusions changed until restored.
 
 - `POST /api/funds/:id/archive` (Admin)
 - `POST /api/funds/:id/restore` (Admin)
+
+## Prospective schedule activation and allocation corrections
+
+When automatic allocation is enabled on a manual Fund, `schedule_started_on`
+records the save date in the installation's time zone. Its first contribution is
+at the next period boundary strictly after that date: an anchor later this month
+can run this month, while an anchor already passed waits until its next occurrence.
+The opening balance, previous category spending, and manual adjustments remain in
+the balance; replay from Fund creation cannot generate contributions before schedule
+activation. Existing schedules are not automatically rewritten by the migration.
+
+Admin register allocation rows have **Remove allocation** with a confirmation.
+Removal marks that Fund/period in `operational_fund_allocation_removals`, clears
+its calculation checkpoint, and replays balances, carryover, and forecast reserves.
+It does not touch Lunch Money transactions, manual adjustments, or other Funds.
+The original amount remains visible with a Removed label and strikethrough, while
+its effective contribution is zero. Repeated projections and restarts respect
+that marker. Opening-balance entries are labeled separately and cannot be removed
+as automatic allocations. Archived Funds must be restored before correction.
+Historical contributions retain their recorded amounts on replay; the current
+schedule amount applies to future contributions, rather than rewriting old funding.
+
+`DELETE /api/funds/:id/allocations/:periodStart` requires Admin access and only
+accepts a period with an existing recorded allocation. The normal projection
+refresh updates the corrected Fund and parent totals.

@@ -95,3 +95,5 @@ export const getFundRegister = async id => (await api.get(`/funds/${id}/register
 
 export const archiveOperationalFund = async id => (await api.post(`/funds/${id}/archive`)).data.fund;
 export const restoreOperationalFund = async id => (await api.post(`/funds/${id}/restore`)).data.fund;
+
+export const removeFundAllocation = async (fundId, periodStart) => (await api.delete(`/funds/${fundId}/allocations/${periodStart}`)).data.fund;

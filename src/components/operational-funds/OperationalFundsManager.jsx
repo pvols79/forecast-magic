@@ -10,7 +10,7 @@ import { formatCurrency } from '../../utils';
 import {
   archiveOperationalFund, restoreOperationalFund, addFundAdjustment, createOperationalFund, deleteOperationalFund, excludeFundTransaction,
   getApiErrorMessage, getCategories, getFundRegister, getOperationalFunds,
-  includeFundTransaction, updateOperationalFund,
+  includeFundTransaction, updateOperationalFund, removeFundAllocation,
 } from '../../backendApi';
 import OperationalFundForm from './OperationalFundForm';
 
@@ -97,6 +97,13 @@ const OperationalFundsManager = ({ accountKey, currentStates, onChanged, compact
       await changed();
     } catch (err) { setError(getApiErrorMessage(err)); }
   };
+  const removeAllocation = async row => {
+    if (!window.confirm(`Remove the ${formatCurrency(row.amount)} allocation dated ${row.date} from ${row.subFundName}? Its balance and forecast reservation will be recalculated. Lunch Money transactions will remain unchanged.`)) return;
+    setError(''); setSaving(true);
+    try { await removeFundAllocation(row.fundId, row.periodStart); await changed(); }
+    catch (err) { setError(getApiErrorMessage(err)); }
+    finally { setSaving(false); }
+  };
   const saveAdjustment = async event => {
     event.preventDefault(); setSaving(true); setError('');
     try {
@@ -158,7 +165,7 @@ const OperationalFundsManager = ({ accountKey, currentStates, onChanged, compact
           <Box>
             <HStack justify="space-between" mb={3} flexWrap="wrap" gap={2}><Heading size="sm">Activity register</Heading><HStack><Select aria-label="Register period" size="sm" value={scope} onChange={event => setScope(event.target.value)}><option value="period">Current period</option><option value="all">All time</option></Select>{children.length > 0 && <Select aria-label="Register sub-fund" size="sm" value={childFilter} onChange={event => setChildFilter(event.target.value)}><option value="">Entire fund</option>{members.map(member => <option key={member.id} value={member.id}>{member.id === selectedId ? 'Unassigned' : member.name}</option>)}</Select>}</HStack></HStack>
             <Text fontSize="sm" color="gray.500" mb={3}>Funding, adjustments, spending, and refunds. Adjustments only change reserved money; they do not create bank transactions. Mark a gift complete in its sub-fund settings after checking the category.</Text>
-            {registerLoading ? <Spinner /> : !rows.length ? <Text color="gray.500">No activity in this period.</Text> : <Box overflowX="auto" maxH="60vh"><Table size="sm"><Thead position="sticky" top={0} bg={bg} zIndex={1}><Tr><Th>Date</Th><Th>Fund</Th><Th>Activity</Th><Th>Type</Th><Th isNumeric>Amount</Th><Th /></Tr></Thead><Tbody>{rows.map(row => <Tr key={`${row.fundId}:${row.transactionId}`} opacity={row.excluded ? 0.5 : 1}><Td whiteSpace="nowrap">{row.date}</Td><Td>{row.subFundName}</Td><Td>{row.description}</Td><Td><Badge>{row.excluded ? 'Excluded' : row.type}</Badge></Td><Td isNumeric whiteSpace="nowrap" color={row.amount > 0 ? 'green.500' : undefined}>{row.amount > 0 ? '+' : ''}{formatCurrency(row.amount)}</Td><Td>{!selected.archivedAt && !funds.find(fund => fund.id === row.fundId)?.archivedAt && ['actual', 'pending'].includes(row.type) && <Button size="xs" onClick={() => toggleExclusion(row)}>{row.excluded ? 'Re-include' : 'Exclude'}</Button>}</Td></Tr>)}</Tbody></Table></Box>}
+            {registerLoading ? <Spinner /> : !rows.length ? <Text color="gray.500">No activity in this period.</Text> : <Box overflowX="auto" maxH="60vh"><Table size="sm"><Thead position="sticky" top={0} bg={bg} zIndex={1}><Tr><Th>Date</Th><Th>Fund</Th><Th>Activity</Th><Th>Type</Th><Th isNumeric>Amount</Th><Th /></Tr></Thead><Tbody>{rows.map(row => <Tr key={`${row.fundId}:${row.transactionId}`} opacity={row.excluded || row.removed ? 0.5 : 1}><Td whiteSpace="nowrap">{row.date}</Td><Td>{row.subFundName}</Td><Td>{row.description}</Td><Td><Badge>{row.removed ? 'Removed' : row.excluded ? 'Excluded' : row.type}</Badge></Td><Td isNumeric whiteSpace="nowrap" textDecoration={row.removed ? 'line-through' : undefined} color={row.amount > 0 ? 'green.500' : undefined}>{row.amount > 0 ? '+' : ''}{formatCurrency(row.amount)}</Td><Td>{!selected.archivedAt && !funds.find(fund => fund.id === row.fundId)?.archivedAt && row.type === 'allocation' && !row.removed && <Button size="xs" colorScheme="red" variant="outline" isDisabled={saving} onClick={() => removeAllocation(row)}>Remove allocation</Button>}{!selected.archivedAt && !funds.find(fund => fund.id === row.fundId)?.archivedAt && ['actual', 'pending'].includes(row.type) && <Button size="xs" onClick={() => toggleExclusion(row)}>{row.excluded ? 'Re-include' : 'Exclude'}</Button>}</Td></Tr>)}</Tbody></Table></Box>}
           </Box>
         </VStack>}
       </>}

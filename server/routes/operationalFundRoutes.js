@@ -134,6 +134,12 @@ export const createOperationalFundRouter = (
     return response.status(201).json({ fund });
   });
 
+  router.delete('/:id/allocations/:periodStart', requireAdmin, (request, response) => {
+    const fund = repository.removeAllocation(Number(request.params.id), request.params.periodStart);
+    if (!fund) return response.status(404).json({ error: 'Fund Allocation not found.' });
+    return response.json({ fund });
+  });
+
   router.post('/:id/exclusions', requireAdmin, (request, response) => {
     const fund = repository.addExclusion(Number(request.params.id), request.body?.transactionId);
     if (!fund) return response.status(404).json({ error: 'Fund Allocation not found.' });

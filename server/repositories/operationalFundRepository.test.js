@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { closeDatabase, configureDatabase, getDatabase } from '../db/database';
 import { runMigrations } from '../db/migrate';
 import { OperationalFundRepository } from './operationalFundRepository';
@@ -36,6 +36,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   closeDatabase();
   fs.rmSync(directory, { recursive: true, force: true });
 });
@@ -236,4 +237,77 @@ it('keeps an archived fund archived if its category was reused', () => {
   expect(repository.getById(original.id).archivedAt).toBeTruthy();
   expect(repository.getById(original.id).active).toBe(false);
   expect(repository.getById(replacement.id).active).toBe(true);
+});
+
+it.each([false, true])('starts a newly enabled monthly schedule at the next anchor, with adjustments=%s', async hasAdjustments => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date('2026-11-17T18:00:00Z'));
+  const saved = repository.create(fund({ name: 'Birthdays', fundType: 'sinking', allocationMode: 'manual', initialBalanceCents: 10000, allocationCents: 0, createdOn: '2026-08-14', categoryIds: [20] }));
+  if (hasAdjustments) repository.addAdjustment(saved.id, { date: '2026-09-05', amountCents: 2500, note: 'Birthday saving' });
+  const transactions = [
+    { transactionId: 'old', accountKey: 'plaid:1', categoryId: 20, date: '2026-08-05', amount: -999, type: 'actual' },
+    { transactionId: 'gift', accountKey: 'plaid:1', categoryId: 20, date: '2026-10-20', amount: -40, type: 'actual' },
+  ];
+  const service = new OperationalFundService(repository, { getTransactions: async () => transactions });
+  const before = await service.getProjection('plaid:1', '2026-11-17', '2026-11-17');
+  const updated = repository.update(saved.id, { allocationMode: 'scheduled', allocationCents: 5000, periodType: 'monthly', anchorDay: 1 });
+  expect(updated.scheduleStartedOn).toBe('2026-11-17');
+  const after = await service.getProjection('plaid:1', '2026-11-17', '2026-12-01');
+  expect(after.currentReservedCents).toBe(before.currentReservedCents);
+  expect(after.currentReservedCents).toBe(hasAdjustments ? 8500 : 6000);
+  expect(after.days.at(-1).totalReservedCents).toBe(after.currentReservedCents + 5000);
+  expect(repository.getAllocationHistory(saved.id)).toEqual([]);
+  expect((await service.getProjection('plaid:1', '2026-12-01', '2026-12-01')).currentReservedCents).toBe(after.currentReservedCents + 5000);
+  expect(repository.getAllocationHistory(saved.id).map(row => row.periodStart)).toEqual(['2026-12-01']);
+});
+
+it('uses the next occurrence within this month and the installation time zone', async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date('2026-11-18T02:00:00Z')); // Still Nov 17 in Chicago.
+  getDatabase().prepare('INSERT INTO application_settings (key, value, updated_at) VALUES (?, ?, ?)').run('timezone', 'America/Chicago', new Date().toISOString());
+  const saved = repository.create(fund({ fundType: 'sinking', allocationMode: 'manual', initialBalanceCents: 10000, categoryIds: [], createdOn: '2026-08-01' }));
+  const service = new OperationalFundService(repository, { getTransactions: async () => [] });
+  repository.update(saved.id, { allocationMode: 'scheduled', periodType: 'monthly', anchorDay: 20, allocationCents: 5000 });
+  expect(repository.getById(saved.id).scheduleStartedOn).toBe('2026-11-17');
+  const projected = await service.getProjection('plaid:1', '2026-11-17', '2026-11-20');
+  expect(projected.currentReservedCents).toBe(10000);
+  expect(projected.days.at(-1).totalReservedCents).toBe(15000);
+});
+
+it('removes individual erroneous past allocations without regenerating them or changing other funding', async () => {
+  const saved = repository.create(fund({ name: 'Birthdays', fundType: 'sinking', allocationMode: 'scheduled', periodType: 'monthly', anchorDay: 1, initialBalanceCents: 10000, allocationCents: 5000, categoryIds: [], createdOn: '2026-08-01' }));
+  repository.addAdjustment(saved.id, { date: '2026-08-12', amountCents: 2500, note: 'Manual addition' });
+  const service = new OperationalFundService(repository, { getTransactions: async () => [] });
+  const before = await service.getProjection('plaid:1', '2026-11-17', '2026-11-17');
+  expect(before.currentReservedCents).toBe(27500);
+  repository.removeAllocation(saved.id, '2026-09-01');
+  repository.removeAllocation(saved.id, '2026-10-01');
+  repository.removeAllocation(saved.id, '2026-10-01'); // Repeated removal is harmless.
+  for (let index = 0; index < 2; index++) {
+    expect((await service.getProjection('plaid:1', '2026-11-17', '2026-12-01')).currentReservedCents).toBe(17500);
+  }
+  const history = repository.getAllocationHistory(saved.id);
+  expect(history.filter(row => row.removedAt)).toHaveLength(2);
+  expect(history.find(row => row.periodStart === '2026-10-01').allocationCents).toBe(5000);
+  expect((await service.getRegister(saved.id, '2026-11-17')).find(row => row.periodStart === '2026-10-01')).toMatchObject({ type: 'allocation', removed: true, amount: 50 });
+  expect(repository.getById(saved.id).adjustments).toHaveLength(1);
+  expect(() => repository.removeAllocation(saved.id, '2026-08-01')).toThrow(/opening balance/);
+  repository.update(saved.id, { allocationCents: 9000 });
+  const updated = await service.getProjection('plaid:1', '2026-11-17', '2026-12-01');
+  expect(updated.currentReservedCents).toBe(17500); // Actual November funding stays $50.
+  expect(updated.days.at(-1).totalReservedCents).toBe(26500); // Future funding uses $90.
+  closeDatabase();
+  configureDatabase(databasePath);
+  repository.removeAllocation(saved.id, '2026-11-01');
+  expect((await service.getProjection('plaid:1', '2026-11-17', '2026-11-17')).currentReservedCents).toBe(12500);
+  expect(repository.getAllocationHistory(saved.id).filter(row => row.removedAt)).toHaveLength(3);
+});
+
+it('recalculates operating-fund rollover after removing a recorded allocation', async () => {
+  const saved = repository.create(fund({ allocationCents: 10000, periodType: 'monthly', anchorDay: 1, rolloverMode: 'full', createdOn: '2026-08-01', categoryIds: [] }));
+  const service = new OperationalFundService(repository, { getTransactions: async () => [] });
+  await service.getProjection('plaid:1', '2026-08-15', '2026-08-15');
+  expect((await service.getProjection('plaid:1', '2026-10-15', '2026-10-15')).currentReservedCents).toBe(30000);
+  repository.removeAllocation(saved.id, '2026-09-01');
+  expect((await service.getProjection('plaid:1', '2026-10-15', '2026-10-15')).currentReservedCents).toBe(20000);
 });

@@ -134,6 +134,7 @@ const OperationalFundForm = ({ accountKey, categories, funds = [], fund, onSave,
               <FormLabel mb="0">Automatic Allocation</FormLabel>
               <Switch isChecked={value.allocationMode === 'scheduled'} onChange={event => setSinkingAutoAllocation(event.target.checked)} />
             </FormControl>
+            {value.allocationMode === 'scheduled' && <ChakraText fontSize="sm" color="gray.500">When enabling automatic allocation, the first contribution is on the next scheduled date after saving. Earlier periods are not funded.</ChakraText>}
             {value.allocationMode === 'scheduled' && (
               <FormControl isRequired>
                 <FormLabel>Allocation per Period</FormLabel>

@@ -27,9 +27,9 @@ const FundTransactionsModal = ({ isOpen, onClose, fund, canManageExclusions = fa
                 <Thead><Tr><Th>Period</Th><Th isNumeric>Period funding</Th><Th isNumeric>Rollover</Th></Tr></Thead>
                 <Tbody>
                   {fund.allocationHistory.map(period => (
-                    <Tr key={period.periodStart}>
-                      <Td whiteSpace="nowrap">{period.periodStart} – {period.periodEnd}</Td>
-                      <Td isNumeric>{formatCurrency(period.allocationCents / 100)}</Td>
+                    <Tr key={period.periodStart} opacity={period.removedAt ? 0.5 : 1}>
+                      <Td whiteSpace="nowrap">{period.periodStart} – {period.periodEnd}{period.removedAt && <Badge ml={2}>Removed</Badge>}</Td>
+                      <Td isNumeric textDecoration={period.removedAt ? 'line-through' : undefined}>{formatCurrency(period.allocationCents / 100)}</Td>
                       <Td isNumeric>{formatCurrency(period.carryInCents / 100)}</Td>
                     </Tr>
                   ))}
