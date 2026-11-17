@@ -4,32 +4,15 @@ import {
   NumberInput, NumberInputField, Select, Stack, Switch, Text as ChakraText,
 } from '@chakra-ui/react';
 
-const emptyFund = accountKey => ({
-  accountKey,
-  name: '',
-  fundType: 'operating',
-  allocationMode: 'scheduled',
-  allocationCents: 0,
-  initialBalanceCents: 0,
-  periodType: 'weekly',
-  weeklyStartDay: 1,
-  anchorMonth: 1,
-  anchorDay: 1,
-  rolloverMode: 'none',
-  rolloverCapCents: null,
-  targetCents: null,
-  householdVisible: false,
-  active: true,
-  categoryIds: [],
-});
+import { createFundFormValue, toggleSinkingAutoAllocation } from './fundFormState';
 
 const weekdays = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
 const OperationalFundForm = ({ accountKey, categories, funds = [], fund, onSave, onCancel, saving }) => {
-  const [value, setValue] = useState(emptyFund(accountKey));
+  const [value, setValue] = useState(() => createFundFormValue(accountKey, fund));
 
-  useEffect(() => setValue(fund ? { ...fund } : emptyFund(accountKey)), [fund, accountKey]);
+  useEffect(() => setValue(createFundFormValue(accountKey, fund)), [fund, accountKey]);
 
   const set = (key, nextValue) => setValue(current => ({ ...current, [key]: nextValue }));
   const dollars = cents => cents == null ? '' : cents / 100;
@@ -74,12 +57,7 @@ const OperationalFundForm = ({ accountKey, categories, funds = [], fund, onSave,
     };
   });
 
-  const setSinkingAutoAllocation = enabled => setValue(current => ({
-    ...current,
-    allocationMode: enabled ? 'scheduled' : 'manual',
-    periodType: enabled ? (current.periodType === 'all-time' ? 'monthly' : current.periodType) : 'all-time',
-    rolloverMode: enabled ? 'full' : 'none',
-  }));
+  const setSinkingAutoAllocation = enabled => setValue(current => toggleSinkingAutoAllocation(current, enabled));
 
   const showPeriod = value.fundType === 'operating' || (value.fundType === 'sinking' && value.allocationMode === 'scheduled');
 
@@ -198,7 +176,7 @@ const OperationalFundForm = ({ accountKey, categories, funds = [], fund, onSave,
             )}
             <FormControl>
               <FormLabel>Anchor Day</FormLabel>
-              <NumberInput min={1} max={31} value={value.anchorDay} onChange={(_, number) => set('anchorDay', number || 1)}>
+              <NumberInput min={1} max={31} value={value.anchorDay ?? 1} onChange={(_, number) => set('anchorDay', number || 1)}>
                 <NumberInputField />
               </NumberInput>
             </FormControl>
