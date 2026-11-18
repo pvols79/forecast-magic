@@ -13,6 +13,7 @@ export const createFundFormValue = (accountKey, fund = {}) => ({
   targetCents: null,
   householdVisible: false,
   active: true,
+  includePriorSpending: false,
   ...fund,
   weeklyStartDay: fund?.weeklyStartDay ?? 1,
   anchorMonth: fund?.anchorMonth ?? 1,

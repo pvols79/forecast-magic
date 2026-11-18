@@ -1,5 +1,5 @@
 import { getPeriodForDate } from '../domain/periods.js';
-import { isOpeningFundAllocation, projectOperationalFunds, rollUpFundProjection } from '../domain/operationalFunds.js';
+import { getFundSpendingStart, isOpeningFundAllocation, projectOperationalFunds, rollUpFundProjection } from '../domain/operationalFunds.js';
 import { OperationalFundRepository } from '../repositories/operationalFundRepository.js';
 import { LunchMoneyService } from './lunchMoneyService.js';
 
@@ -18,7 +18,7 @@ export class OperationalFundService {
     const fund = this.repository.getById(id);
     if (!fund) return null;
     const funds = [fund, ...this.repository.listByAccount(fund.accountKey).filter(child => child.parentId === fund.id)];
-    const start = earliest(funds.map(item => item.createdOn));
+    const start = earliest(funds.map(getFundSpendingStart));
     const transactions = await this.lunchMoneyService.getTransactions(start, throughDate, throughDate);
     return funds.flatMap(item => {
       const history = this.repository.getAllocationHistory(item.id);
@@ -43,7 +43,7 @@ export class OperationalFundService {
           amount: entry.allocationCents / 100, removed: Boolean(entry.removedAt),
         })),
         ...transactions.filter(row => row.accountKey === item.accountKey
-          && item.categoryIds.includes(Number(row.categoryId)) && row.date >= item.createdOn
+          && item.categoryIds.includes(Number(row.categoryId)) && row.date >= getFundSpendingStart(item)
           && row.date <= cutoff && ['actual', 'pending'].includes(row.type)).map(row => ({
           ...row, fundId: item.id, subFundName: item.name,
           excluded: item.excludedTransactionIds.includes(String(row.transactionId)),
@@ -65,9 +65,14 @@ export class OperationalFundService {
       let checkpoint = this.repository.getCurrentState(fund.id);
       // Rebuild dated adjustments and manual spending from opening. The schedule
       // activation date prevents that replay from inventing earlier contributions.
-      if ((fund.adjustments?.length || fund.scheduleStartedOn || fund.removedAllocationPeriods?.length) && fund.periodType !== 'all-time') {
+      if ((fund.adjustments?.length || fund.scheduleStartedOn || fund.removedAllocationPeriods?.length || fund.includePriorSpending) && fund.periodType !== 'all-time') {
         const firstRecorded = fund.recordedAllocationHistory.at(-1);
-        const opening = getPeriodForDate(fund, fund.fundType === 'operating' ? firstRecorded?.periodStart || anchorDate : fund.createdOn);
+        const replayStart = fund.includePriorSpending
+          ? fund.fundType === 'sinking' && (fund.scheduleStartedOn || fund.adjustments?.length)
+            ? fund.createdOn
+            : firstRecorded?.periodStart || checkpoint?.periodStart || getPeriodForDate(fund, anchorDate).start
+          : fund.fundType === 'operating' ? firstRecorded?.periodStart || anchorDate : fund.createdOn;
+        const opening = getPeriodForDate(fund, replayStart);
         const recordedOpening = fund.recordedAllocationHistory.find(entry => entry.periodStart === opening.start);
         const originalOpening = fund.recordedAllocationHistory.find(entry => isOpeningFundAllocation(fund, entry));
         checkpoint = { periodStart: opening.start,
@@ -75,7 +80,8 @@ export class OperationalFundService {
           carryInCents: fund.fundType === 'operating' ? recordedOpening?.carryInCents || 0 : 0 };
       }
       if (checkpoint) checkpoints.set(fund.id, checkpoint);
-      return checkpoint?.periodStart || getPeriodForDate(fund, anchorDate).start;
+      fund.historicalSpendingPeriodStart = checkpoint?.periodStart || getPeriodForDate(fund, anchorDate).start;
+      return fund.includePriorSpending ? getFundSpendingStart(fund) : fund.historicalSpendingPeriodStart;
     }));
 
     const transactions = await this.lunchMoneyService.getTransactions(

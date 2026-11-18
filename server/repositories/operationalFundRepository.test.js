@@ -380,3 +380,45 @@ it('does not apply a removal from one year to the same monthly anchor in the fol
   expect(history.find(row => row.periodStart === '2026-11-01').removedAt).toBeTruthy();
   expect(history.find(row => row.periodStart === '2027-11-01')).toMatchObject({ allocationCents: 1000, removedAt: null });
 });
+
+it.each(['reserved', 'sinking'])('includes recategorized pre-creation spending in %s balances and history when selected', async fundType => {
+  const saved = repository.create(fund({ name: 'Gift budget', fundType, allocationMode: 'manual', allocationCents: 10000, initialBalanceCents: 10000, categoryIds: [20], createdOn: '2026-11-01' }));
+  let transactions = [
+    { transactionId: 'gift', accountKey: 'plaid:1', categoryId: 99, date: '2026-09-10', amount: -40, type: 'actual' },
+    { transactionId: 'refund', accountKey: 'plaid:1', categoryId: 20, date: '2026-09-12', amount: 10, type: 'actual' },
+    { transactionId: 'other-account', accountKey: 'plaid:2', categoryId: 20, date: '2026-09-10', amount: -999, type: 'actual' },
+  ];
+  const calls = [];
+  const service = new OperationalFundService(repository, { getTransactions: async (start, end) => { calls.push(start); return transactions.filter(row => row.date >= start && row.date <= end); } });
+  expect((await service.getProjection('plaid:1', '2026-11-17', '2026-11-17')).currentReservedCents).toBe(10000);
+  repository.update(saved.id, { includePriorSpending: true });
+  expect((await service.getProjection('plaid:1', '2026-11-17', '2026-11-17')).currentReservedCents).toBe(11000);
+  // LM recategorization is visible on the next read; no copied registry is used.
+  transactions = transactions.map(row => row.transactionId === 'gift' ? { ...row, categoryId: 20 } : row);
+  expect((await service.getProjection('plaid:1', '2026-11-17', '2026-11-17')).currentReservedCents).toBe(7000);
+  const register = await service.getRegister(saved.id, '2026-11-17');
+  expect(register.filter(row => row.type === 'actual').map(row => row.transactionId).sort()).toEqual(['gift', 'refund']);
+  expect(calls).toContain('1900-01-01');
+  repository.addExclusion(saved.id, 'gift');
+  expect((await service.getProjection('plaid:1', '2026-11-17', '2026-11-17')).currentReservedCents).toBe(11000);
+  expect((await service.getRegister(saved.id, '2026-11-17')).find(row => row.transactionId === 'gift').excluded).toBe(true);
+  repository.update(saved.id, { includePriorSpending: false });
+  expect((await service.getProjection('plaid:1', '2026-11-17', '2026-11-17')).currentReservedCents).toBe(10000);
+});
+
+it('includes older spending without backfilling allocations when auto funding is newly enabled', async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date('2026-11-17T18:00:00Z'));
+  const saved = repository.create(fund({ fundType: 'sinking', allocationMode: 'manual', initialBalanceCents: 10000, categoryIds: [20], createdOn: '2026-10-01', includePriorSpending: true }));
+  repository.addAdjustment(saved.id, { date: '2026-10-05', amountCents: 2000, note: 'Extra gift money' });
+  const service = new OperationalFundService(repository, { getTransactions: async () => [{ transactionId: 'old-gift', accountKey: 'plaid:1', categoryId: 20, date: '2026-08-15', amount: -30, type: 'actual' }] });
+  repository.update(saved.id, { allocationMode: 'scheduled', periodType: 'monthly', anchorDay: 1, allocationCents: 5000 });
+  const projected = await service.getProjection('plaid:1', '2026-11-17', '2026-12-01');
+  expect(projected.currentReservedCents).toBe(9000);
+  expect(projected.days.at(-1).totalReservedCents).toBe(14000);
+  expect(repository.getAllocationHistory(saved.id)).toEqual([]);
+  const december = await service.getProjection('plaid:1', '2026-12-01', '2026-12-01');
+  expect(december.currentReservedCents).toBe(14000);
+  expect((await service.getProjection('plaid:1', '2026-12-01', '2026-12-01')).currentReservedCents).toBe(14000);
+  expect(repository.getAllocationHistory(saved.id).map(row => row.periodStart)).toEqual(['2026-12-01']);
+});

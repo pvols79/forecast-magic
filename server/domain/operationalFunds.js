@@ -1,6 +1,8 @@
 import { addDays, getPeriodForDate } from './periods.js';
 
 const fundTypeFor = fund => fund.fundType || (fund.periodType === 'all-time' ? 'reserved' : 'operating');
+export const getFundSpendingStart = fund => fund.includePriorSpending ? '1900-01-01' : fund.createdOn || fund.createdAt?.slice(0, 10);
+
 const allocationModeFor = fund => fund.allocationMode || (fundTypeFor(fund) === 'reserved' ? 'manual' : 'scheduled');
 
 // The original period may no longer match the Fund's current schedule after
@@ -12,7 +14,7 @@ export const isOpeningFundAllocation = (fund, allocation) => fundTypeFor(fund) =
 
 const isMappedTransaction = (fund, transaction, startDate, endDate, anchorDate) => {
   if (transaction.accountKey !== fund.accountKey) return false;
-  if (fundTypeFor(fund) === 'sinking' && fund.createdOn && transaction.date < fund.createdOn) return false;
+  if (fundTypeFor(fund) === 'sinking' && getFundSpendingStart(fund) && transaction.date < getFundSpendingStart(fund)) return false;
   if (!fund.categoryIds.includes(Number(transaction.categoryId))) return false;
   if (transaction.amount === 0) return false;
   if (transaction.date < startDate || transaction.date > endDate) return false;
@@ -32,7 +34,8 @@ const transactionsForPeriod = (fund, transactions, period, throughDate, anchorDa
   transactions.filter(transaction => isMappedTransaction(
     fund,
     transaction,
-    period.start,
+    fund.includePriorSpending && (fund.periodType === 'all-time' || period.start === fund.historicalSpendingPeriodStart)
+      ? getFundSpendingStart(fund) : period.start,
     throughDate,
     anchorDate
   )).map(transaction => ({
@@ -80,7 +83,7 @@ const annotateTransactions = (transactions, startingCents) => {
 const stateForPeriod = (fund, period, allocationCents, carryInCents, transactions, throughDate, anchorDate) => {
   const periodTransactions = [
     ...transactionsForPeriod(fund, transactions, period, throughDate, anchorDate),
-    ...(fund.adjustments || []).filter(entry => entry.date >= period.start && entry.date <= throughDate).map(entry => ({
+    ...(fund.adjustments || []).filter(entry => entry.date >= (fund.includePriorSpending && period.start === fund.historicalSpendingPeriodStart ? (fund.createdOn < period.start ? fund.createdOn : period.start) : period.start) && entry.date <= throughDate).map(entry => ({
       transactionId: `adjustment:${entry.id}`, date: entry.date, description: entry.note,
       amount: entry.amountCents / 100, type: 'adjustment', excluded: false,
     })),
@@ -201,6 +204,7 @@ const publicFundState = (fund, state) => ({
   fundType: fundTypeFor(fund),
   allocationMode: allocationModeFor(fund),
   scheduleStartedOn: fund.scheduleStartedOn,
+  includePriorSpending: fund.includePriorSpending,
   allocationCents: state.allocationCents,
   scheduledAllocationCents: fund.allocationCents,
   initialBalanceCents: fund.initialBalanceCents,

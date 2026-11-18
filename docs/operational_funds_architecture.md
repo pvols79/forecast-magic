@@ -187,3 +187,25 @@ schedule amount applies to future contributions, rather than rewriting old fundi
 `DELETE /api/funds/:id/allocations/:periodStart` requires Admin access and only
 accepts a period with an existing recorded allocation. The normal projection
 refresh updates the corrected Fund and parent totals.
+
+## Including spending before Fund creation
+
+Fund settings offer **Spending included in this fund**: **Since fund creation**
+(the existing default) or **All category history**. `include_prior_spending` is
+opt-in per Fund and sub-fund. With all history selected, the live LM query starts
+at 1900-01-01 and includes matching category purchases and refunds from the same
+bank account in both the full register and balance calculation. Transaction
+exclusions still apply. This does not modify LM or create a copied spending ledger.
+Changing a category in LM is reflected on a subsequent register/projection refresh.
+
+Earlier category activity draws against the Fund's initial funding period, then
+normal recorded contributions and rollover continue from the existing funding
+baseline. Historical spending scope never moves automatic-allocation activation
+backward or creates funding periods before the known schedule began. Operating
+Funds still obey period resets and rollover, so spending from a completed period
+in a no-rollover Fund does not reduce a later period's new allocation. For a
+persistent gift or event balance, Reserved or Sinking is the appropriate type.
+
+Changing this setting invalidates the calculation checkpoint. Other Funds retain
+their prior spending scope. Earlier spending should only be included when the
+opening amount has not already been reduced for those same purchases.

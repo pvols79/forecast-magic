@@ -41,6 +41,7 @@ const hydrateFund = (db, row) => {
     householdVisible: toBoolean(row.household_visible),
     active: toBoolean(row.active),
     createdOn: row.created_on,
+    includePriorSpending: Boolean(row.include_prior_spending),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     categoryIds,
@@ -105,6 +106,7 @@ const normalizeInput = input => {
     householdVisible: input.householdVisible ? 1 : 0,
     active: input.active === false ? 0 : 1,
     createdOn: input.createdOn || input.createdAt?.slice(0, 10) || new Date().toISOString().slice(0, 10),
+    includePriorSpending: Boolean(input.includePriorSpending),
     categoryIds: [...new Set((input.categoryIds || []).map(Number))],
   };
 };
@@ -188,6 +190,7 @@ export class OperationalFundRepository {
       );
       const id = Number(result.lastInsertRowid);
       db.prepare('UPDATE operational_funds SET parent_id = ?, occasion_date = ?, purchased_on = ? WHERE id = ?').run(parentId, input.occasionDate || null, input.purchasedOn || null, id);
+      db.prepare('UPDATE operational_funds SET include_prior_spending = ? WHERE id = ?').run(fund.includePriorSpending ? 1 : 0, id);
       replaceCategories(db, id, fund.categoryIds);
       return hydrateFund(db, db.prepare('SELECT * FROM operational_funds WHERE id = ?').get(id));
     });
@@ -237,8 +240,10 @@ export class OperationalFundRepository {
         const startedOn = getDateInTimezone(new Date(), timezone);
         db.prepare('UPDATE operational_funds SET schedule_started_on = ? WHERE id = ?').run(startedOn, id);
       }
+      db.prepare('UPDATE operational_funds SET include_prior_spending = ? WHERE id = ?').run(fund.includePriorSpending ? 1 : 0, id);
       replaceCategories(db, Number(id), fund.categoryIds);
       const periodConfigurationChanged =
+        existing.includePriorSpending !== fund.includePriorSpending ||
         existing.accountKey !== fund.accountKey ||
         existing.fundType !== fund.fundType ||
         existing.allocationMode !== fund.allocationMode ||

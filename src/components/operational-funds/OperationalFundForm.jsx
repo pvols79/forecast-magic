@@ -218,6 +218,14 @@ const OperationalFundForm = ({ accountKey, categories, funds = [], fund, onSave,
           </Box>
           <ChakraText fontSize="xs" color="gray.500" mt={1}>Categories are optional for Reserved and Sinking Funds.</ChakraText>
         </FormControl>
+        <FormControl>
+          <FormLabel>Spending included in this fund</FormLabel>
+          <Select value={value.includePriorSpending ? 'all' : 'since-created'} onChange={event => set('includePriorSpending', event.target.value === 'all')}>
+            <option value="since-created">Since fund creation</option>
+            <option value="all">All category history</option>
+          </Select>
+          <ChakraText fontSize="sm" color="gray.500" mt={2}>All category history includes earlier purchases and refunds from this bank account in both the register and balance. Excluded transactions stay excluded. It does not create older automatic allocations. Operating funds still follow their period and rollover rules.</ChakraText>
+        </FormControl>
         <HStack spacing={8}>
           <FormControl display="flex" alignItems="center">
             <FormLabel mb="0">Visible to Household</FormLabel>
