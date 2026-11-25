@@ -101,8 +101,9 @@ For Docker, mount `/data` persistently. An external NGINX server may proxy HTTPS
 ## Funds workspace, sub-funds, and adjustments
 
 Admin has a dedicated Funds view with a tabular overview, selected-fund summary,
-sub-fund table, and an inline activity register. The Forecast retains a compact
-Fund overview and Create Fund. Settings live in a drawer. The register can show
+sub-fund table, and an inline activity register. Fund listings and creation live
+on the Funds tab rather than the Forecast page. Household uses the same tab for
+its read-only visible Fund summaries. Settings live in a drawer. The register can show
 current-period or all-time activity and filter to a child or the parent's own
 portion. All-time spending is read live from Lunch Money from Fund creation;
 allocation entries use recorded allocation history, not an invented historical

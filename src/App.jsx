@@ -64,7 +64,6 @@ function App() {
   const [projection, setProjection] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [selectedFundId, setSelectedFundId] = useState(null);
   const [activePage, setActivePage] = useState('forecast');
   const [fundRefresh, setFundRefresh] = useState(0);
   const [duplicateScanRequest, setDuplicateScanRequest] = useState(0);
@@ -297,12 +296,16 @@ function App() {
               )}
             </VStack>
 
-            {isAdminView && authStatus?.isAdmin && <HStack role="navigation" aria-label="Main views">
+            {selectedAccountId && <HStack role="navigation" aria-label="Main views">
               <Button colorScheme={activePage === 'forecast' ? 'blue' : 'gray'} variant={activePage === 'forecast' ? 'solid' : 'ghost'} onClick={() => setActivePage('forecast')}>Forecast</Button>
               <Button colorScheme={activePage === 'funds' ? 'blue' : 'gray'} variant={activePage === 'funds' ? 'solid' : 'ghost'} onClick={() => setActivePage('funds')}>Funds</Button>
             </HStack>}
-            {activePage === 'funds' && isAdminView && authStatus?.isAdmin && selectedAccountId ? (
-              <OperationalFundsManager key={selectedAccountId} initialSelectedId={selectedFundId} accountKey={selectedAccountId} currentStates={projection?.operationalFunds} onChanged={() => setFundRefresh(value => value + 1)} />
+            {activePage === 'funds' && selectedAccountId ? (
+              isAdminView && authStatus?.isAdmin ? (
+                <OperationalFundsManager key={selectedAccountId} accountKey={selectedAccountId} currentStates={projection?.operationalFunds} onChanged={() => setFundRefresh(value => value + 1)} />
+              ) : (
+                <HouseholdFundSummaries funds={projection?.operationalFunds} />
+              )
             ) : projection ? (
               <VStack spacing={4} w="100%" align="stretch">
                 {isAdminView && authStatus?.isAdmin && selectedAccount && (
@@ -338,16 +341,6 @@ function App() {
                   </Box>
                   <KeyEvents events={projection.keyEvents} historicalMissedEvents={projection.historicalMissedEvents} />
                 </Box>
-                {!isAdminView && <HouseholdFundSummaries funds={projection.operationalFunds} />}
-                {isAdminView && authStatus?.isAdmin && (
-                  <OperationalFundsManager
-                    compact
-                    onOpenFunds={id => { setSelectedFundId(id || null); setActivePage('funds'); }}
-                    accountKey={selectedAccountId}
-                    currentStates={projection.operationalFunds}
-                    onChanged={() => setFundRefresh(value => value + 1)}
-                  />
-                )}
               </VStack>
             ) : (
               <VStack spacing={8} w="100%" align="center" justify="center" minH="300px" borderWidth="1px" borderRadius="md" boxShadow="md" bg={panelBg}>
