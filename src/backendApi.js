@@ -12,6 +12,7 @@ export const saveApiKey = async apiKey => api.put('/settings/api-key', { apiKey 
 export const clearApiKey = async () => api.delete('/settings/api-key');
 
 export const getCategories = async () => (await api.get('/lunch-money/categories')).data.categories;
+export const getTags = async () => (await api.get('/lunch-money/tags')).data.tags;
 
 export const getFinancialOverview = async (accountKey, anchorDate) => (
   await api.get('/analytics/overview', { params: { accountKey, anchorDate } })

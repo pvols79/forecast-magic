@@ -126,6 +126,12 @@ The Admin Forecast Detail tab traces the current synced Lunch Money balance thro
 
 The forecast header's **90 Day Lowest Balance** is the minimum available-to-spend balance from today through 90 days ahead, after all modeled activity and fund holds. The earliest low-point date is shown. This calculation always covers 90 days even when the chart horizon is shorter; future allocation projections do not become posted allocation history just because they were forecast.
 
+Upcoming also supports horizontal touch swiping, trackpad scrolling, arrow buttons, and left/right keyboard navigation.
+
+Each fund or sub-fund can match Lunch Money categories, tags, or both. With both groups selected, choose **category OR tag** (either group qualifies) or **category AND tag** (both groups must qualify). Any selected tag is enough within the tag group. Every transaction counts once per fund, even if its category and several tags all match. Existing category-only funds retain their behavior. Categories and tags each have one active owner per account; cross-fund category/tag overlaps on an actual transaction produce a conflict instead of double-counting reservations. Resolve the rules or explicitly exclude that transaction from all but one fund.
+
+Matching positive inflows (deposits and refunds) increase the fund, just as matching outflows reduce it. They appear in the activity register and follow the same account, date-range, exclusion, and operating-period/rollover rules. Existing overspending is offset before a positive reserve reappears. Future-dated inflows apply on their transaction date. This reserves money from an existing LM transaction; it does not create another bank transaction or add the deposit twice to the bank balance. Use **All matching category / tag history** to include activity predating fund creation.
+
 Fund Allocations are reservation policy, not transactions. They never create fake financial events and never appear in Upcoming.
 
 ```text

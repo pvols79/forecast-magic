@@ -19,6 +19,8 @@ export const createFundFormValue = (accountKey, fund = {}) => ({
   anchorMonth: fund?.anchorMonth ?? 1,
   anchorDay: fund?.anchorDay ?? 1,
   categoryIds: fund?.categoryIds ?? [],
+  tagIds: fund?.tagIds ?? [],
+  matchMode: fund?.matchMode ?? 'any',
 });
 
 export const toggleSinkingAutoAllocation = (current, enabled) => ({

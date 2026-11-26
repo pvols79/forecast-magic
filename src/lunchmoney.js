@@ -60,6 +60,7 @@ export const normalizeTransaction = (transaction) => {
     amount: normalizeLunchMoneyAmount(transaction.to_base ?? transaction.amount),
     type: transaction.is_pending ? 'pending' : (transaction.date > new Date().toISOString().slice(0, 10) ? 'future' : 'actual'),
     transactionId: transaction.id,
+    categoryId: transaction.category_id,
     recurringId: transaction.recurring_id,
     lunchMoneySource,
     balanceTreatment: getTransactionBalanceTreatment({

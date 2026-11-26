@@ -92,7 +92,7 @@ const ForecastDetail = ({ projection, account }) => {
         <ReportTable headers={['Fund / sub-fund', 'Funding mode', 'Period funding', 'Carry-in']} rows={funds.map(fund => [
           fund.displayName, fund.allocationMode === 'scheduled' ? 'Scheduled' : 'Manual / opening funding', money(fund.allocationCents), money(fund.carryInCents),
         ])} />
-        <Heading size="sm" mt={4}>Spending, refunds, and adjustments used by the funds</Heading>
+        <Heading size="sm" mt={4}>Spending, deposits, refunds, and adjustments used by the funds</Heading>
         <ReportTable headers={['Fund activity', 'Treatment', 'Amount', 'Covered / restored']} rows={fundRoots.flatMap(root => (root.transactions || []).map(row => [
           `${row.date} · ${root.name}${row.subFundName ? ` → ${row.subFundName}` : ''} · ${row.description}`,
           row.excluded ? 'Excluded from fund only' : row.type === 'adjustment' ? 'Reservation adjustment; no bank transaction' : row.overBudgetCents ? `${money(row.overBudgetCents)} exceeds this fund’s funding` : 'Included in remaining reservation',
@@ -106,7 +106,7 @@ const ForecastDetail = ({ projection, account }) => {
         ])} />
       </Section>
       <Section title={`Future spending against funds · ${drawdowns.length} changes`}>
-        <ReportTable headers={['Date / fund', 'Source', 'Covered spending', 'Restored refunds']} rows={drawdowns.map(row => [
+        <ReportTable headers={['Date / fund', 'Source', 'Covered spending', 'Reserved inflows']} rows={drawdowns.map(row => [
           `${row.date} · ${row.name}`, row.sourceFundName || row.name, money(row.coveredCents), money(row.restoredCents),
         ])} />
       </Section>

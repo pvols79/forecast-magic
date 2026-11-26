@@ -123,6 +123,17 @@ describe('Financial analytics', () => {
     expect(result.topPayee).toEqual({ payee: 'Kroger', amountCents: 30000, transactionCount: 1 });
   });
 
+  it('recognizes tag-mapped sub-funds and AND rules when identifying unallocated spending', () => {
+    const result = summarizeUnallocatedSpending([
+      transaction({ transactionId: 1, categoryId: 2, tagIds: [501], amount: -100 }),
+      transaction({ transactionId: 2, categoryId: 3, tagIds: [502], amount: -50 }),
+      transaction({ transactionId: 3, categoryId: 3, tagIds: [], amount: -25 }),
+    ], categories, [{ categoryIds: [], children: [{ tagIds: [501] }] },
+      { categoryIds: [3], tagIds: [502], matchMode: 'all' }], 'plaid:1', '2026-08-14');
+    expect(result.totalCents).toBe(2500);
+    expect(result.topExpenditures.map(row => row.transactionId)).toEqual([3]);
+  });
+
   it('returns only Household-visible Fund card fields', () => {
     const result = householdFundCards([
       {

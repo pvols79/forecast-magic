@@ -1,4 +1,5 @@
 import { addDays } from './periods.js';
+import { matchesFundSelectors } from './fundMatching.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const toCents = amount => Math.round(Number(amount || 0) * 100);
@@ -211,13 +212,11 @@ const expenditure = (transaction, categoriesById) => ({
 
 export const summarizeUnallocatedSpending = (transactions, categories, funds, accountKey, anchorDate) => {
   const categoriesById = new Map(categories.map(category => [Number(category.id), category]));
-  const allocatedCategoryIds = new Set(
-    funds.flatMap(fund => fund.categoryIds || []).map(Number)
-  );
+  const mappedFunds = funds.flatMap(fund => [fund, ...(fund.children || [])]);
   const startDate = addDays(anchorDate, -29);
   const unallocated = postedExpenses(transactions, categoriesById, accountKey, startDate, anchorDate)
     .filter(transaction => transaction.recurringId == null)
-    .filter(transaction => !allocatedCategoryIds.has(Number(transaction.categoryId)));
+    .filter(transaction => !mappedFunds.some(fund => matchesFundSelectors(fund, transaction)));
   const expenditures = unallocated
     .map(transaction => expenditure(transaction, categoriesById))
     .sort((left, right) => right.amountCents - left.amountCents || right.date.localeCompare(left.date));

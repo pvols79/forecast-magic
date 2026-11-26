@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
-  Badge, Box, Heading, HStack, IconButton, SimpleGrid, Text as ChakraText,
-  useBreakpointValue, useColorModeValue,
+  Badge, Box, Heading, HStack, IconButton, Text as ChakraText,
+  useColorModeValue, usePrefersReducedMotion,
 } from '@chakra-ui/react';
 import { FaChevronLeft, FaChevronRight } from 'react-icons/fa';
 import { formatCurrency } from '../utils';
@@ -56,7 +56,7 @@ const KeyEventCard = ({ event }) => {
   const absoluteDate = format(parse(event.date, 'yyyy-MM-dd', new Date()), 'MMM d, yyyy');
 
   return (
-    <Box bg={cardBg} borderRadius="md" borderWidth="1px" p={2.5} minH="116px">
+    <Box bg={cardBg} borderRadius="md" borderWidth="1px" p={2.5} minH="116px" h="100%">
       <HStack justify="space-between" align="start" mb={1.5}>
         <Box minW={0}>
           <ChakraText fontSize="sm" fontWeight="medium" color={mutedColor}>
@@ -87,25 +87,34 @@ const KeyEventCard = ({ event }) => {
 };
 
 const KeyEventCarousel = ({ events, historicalMissedEvents }) => {
-  const [startIndex, setStartIndex] = useState(0);
-  const visibleCount = useBreakpointValue({ base: 1, sm: 2, md: 3, lg: 5, '2xl': 6 }, { fallback: 'lg' }) || 5;
+  const track = useRef(null);
+  const reducedMotion = usePrefersReducedMotion();
+  const [position, setPosition] = useState({ start: 0, end: 0, atStart: true, atEnd: false });
   const carouselEvents = useMemo(() => {
     const today = getLocalDateString(new Date());
     return selectUpcomingEvents(events, historicalMissedEvents, today);
   }, [events, historicalMissedEvents]);
-  const visibleEvents = useMemo(
-    () => carouselEvents.slice(startIndex, startIndex + visibleCount),
-    [carouselEvents, startIndex, visibleCount]
-  );
-  const canGoBack = startIndex > 0;
-  const canGoForward = startIndex + visibleCount < carouselEvents.length;
   const bg = useColorModeValue('gray.50', 'gray.800');
   const mutedColor = useColorModeValue('gray.600', 'gray.300');
 
-  useEffect(() => {
-    const lastStartIndex = Math.max(0, carouselEvents.length - visibleCount);
-    if (startIndex > lastStartIndex) setStartIndex(lastStartIndex);
-  }, [carouselEvents.length, startIndex, visibleCount]);
+  useLayoutEffect(() => {
+    const element = track.current;
+    if (!element) return;
+    const update = () => {
+      const viewport = element.getBoundingClientRect();
+      const visible = [...element.children].map((child, index) => ({ rect: child.getBoundingClientRect(), index }))
+        .filter(({ rect }) => rect.right > viewport.left + 8 && rect.left < viewport.right - 8);
+      setPosition({ start: visible[0]?.index || 0, end: (visible.at(-1)?.index ?? -1) + 1,
+        atStart: element.scrollLeft <= 8, atEnd: element.scrollLeft + element.clientWidth >= element.scrollWidth - 8 });
+    };
+    element.scrollLeft = 0;
+    update();
+    element.addEventListener('scroll', update, { passive: true });
+    const observer = new ResizeObserver(update);
+    observer.observe(element);
+    return () => { element.removeEventListener('scroll', update); observer.disconnect(); };
+  }, [carouselEvents]);
+  const scroll = direction => track.current?.scrollBy({ left: direction * track.current.clientWidth * 0.8, behavior: reducedMotion ? 'auto' : 'smooth' });
 
   if (!carouselEvents || carouselEvents.length === 0) return null;
 
@@ -120,31 +129,37 @@ const KeyEventCarousel = ({ events, historicalMissedEvents }) => {
           <IconButton
             aria-label="Previous key events"
             icon={<FaChevronLeft />}
-            onClick={() => setStartIndex(index => Math.max(0, index - visibleCount))}
-            isDisabled={!canGoBack}
+            onClick={() => scroll(-1)}
+            isDisabled={position.atStart}
             size="sm"
             variant="outline"
           />
           <IconButton
             aria-label="Next key events"
             icon={<FaChevronRight />}
-            onClick={() => setStartIndex(index => Math.min(
-              Math.max(0, carouselEvents.length - visibleCount),
-              index + visibleCount
-            ))}
-            isDisabled={!canGoForward}
+            onClick={() => scroll(1)}
+            isDisabled={position.atEnd}
             size="sm"
             variant="outline"
           />
         </HStack>
       </HStack>
-      <SimpleGrid columns={{ base: 1, sm: 2, md: 3, lg: 5, '2xl': 6 }} spacing={2.5}>
-        {visibleEvents.map((event, index) => (
-          <KeyEventCard key={`${event.date}-${event.description}-${startIndex + index}`} event={event} />
+      <ChakraText fontSize="xs" color={mutedColor} mb={2}>Swipe or scroll to browse upcoming activity</ChakraText>
+      <HStack ref={track} role="region" aria-label="Upcoming activity" overflowX="auto" align="stretch" spacing={2.5} py={1}
+        tabIndex={0} sx={{ scrollSnapType: 'x mandatory', overscrollBehaviorX: 'contain' }}
+        onKeyDown={event => {
+          if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') { event.preventDefault(); scroll(event.key === 'ArrowLeft' ? -1 : 1); }
+        }}>
+        {carouselEvents.map((event, index) => (
+          <Box key={`${event.id || event.transactionId || event.recurringId || ''}:${event.date}:${index}`}
+            flex={{ base: '0 0 85%', sm: '0 0 44%', md: '0 0 30%', lg: '0 0 18%', '2xl': '0 0 15%' }} minW={0}
+            sx={{ scrollSnapAlign: 'start' }}>
+            <KeyEventCard event={event} />
+          </Box>
         ))}
-      </SimpleGrid>
+      </HStack>
       <ChakraText mt={2} fontSize="xs" color={mutedColor} textAlign="right">
-        {startIndex + 1}-{Math.min(startIndex + visibleCount, carouselEvents.length)} of {carouselEvents.length}
+        {position.start + 1}-{Math.max(position.start + 1, position.end)} of {carouselEvents.length}
       </ChakraText>
     </Box>
   );

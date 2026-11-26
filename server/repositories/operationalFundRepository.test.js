@@ -42,6 +42,66 @@ afterEach(() => {
 });
 
 describe('OperationalFundRepository', () => {
+  it('persists tag selection and matching mode without changing existing category-only funds', () => {
+    const categoryOnly = repository.create(fund());
+    expect(categoryOnly).toMatchObject({ tagIds: [], matchMode: 'any', categoryIds: [10] });
+    const tagged = repository.create(fund({ categoryIds: [], tagIds: [501, 501, 502], matchMode: 'all' }));
+    expect(repository.getById(tagged.id)).toMatchObject({ tagIds: [501, 502], matchMode: 'all' });
+    expect(repository.update(tagged.id, { name: 'Retained tags' }).tagIds).toEqual([501, 502]);
+    expect(() => repository.create(fund({ categoryIds: [], tagIds: [501] }))).toThrow(/already assigned/);
+    expect(() => repository.update(tagged.id, { tagIds: [-1] })).toThrow(/positive integers/);
+    expect(() => repository.update(tagged.id, { matchMode: 'unsupported' })).toThrow(/either or both/);
+    repository.archive(tagged.id);
+    repository.create(fund({ categoryIds: [], tagIds: [501] }));
+    expect(() => repository.restore(tagged.id)).toThrow(/already assigned/);
+    expect(repository.getById(tagged.id).archivedAt).toBeTruthy();
+  });
+
+  it('counts spending and deposits once when category plus multiple tags match, in both register and projections', async () => {
+    const saved = repository.create(fund({ fundType: 'reserved', allocationCents: 10000, createdOn: '2026-08-01', tagIds: [501, 502] }));
+    const transaction = (transactionId, date, amount, categoryId = 10, tagIds = [501, 502]) => ({ transactionId, accountKey: 'plaid:1', date, amount, categoryId, tagIds, type: date > '2026-08-13' ? 'future' : 'actual', description: `Activity ${transactionId}` });
+    const transactions = [transaction(1, '2026-08-10', -40), transaction(2, '2026-08-11', 25),
+      transaction(3, '2026-08-12', 10, 99, [501]), transaction(4, '2026-08-13', 5, 10, []),
+      transaction(5, '2026-08-14', -20), transaction(6, '2026-08-15', 30, 99, [502])];
+    const service = new OperationalFundService(repository, { getTransactions: async () => transactions });
+    const projection = await service.getProjection('plaid:1', '2026-08-13', '2026-08-15');
+    expect(projection.days.map(day => day.totalReservedCents)).toEqual([10000, 8000, 11000]);
+    expect(projection.currentFunds[0].transactions).toHaveLength(4);
+    expect(projection.days[1].transactionDrawdowns).toHaveLength(1);
+    expect(projection.days[2].transactionDrawdowns).toHaveLength(1);
+    const register = (await service.getRegister(saved.id, '2026-08-13')).filter(row => row.type !== 'opening');
+    expect(register.map(row => row.transactionId)).toEqual([4, 3, 2, 1]);
+    expect(register.filter(row => row.amount > 0).reduce((sum, row) => sum + row.amount, 0)).toBe(40);
+    // Live tagging changes affect the same matching logic in register and balance.
+    await repository.update(saved.id, { categoryIds: [], matchMode: 'all' });
+    expect((await service.getProjection('plaid:1', '2026-08-13', '2026-08-13')).currentReservedCents).toBe(9500);
+  });
+
+  it('uses tags for prior spending and deposits while preserving exclusions and account boundaries', async () => {
+    const saved = repository.create(fund({ fundType: 'reserved', allocationCents: 0, createdOn: '2026-08-10', categoryIds: [], tagIds: [501], includePriorSpending: true }));
+    const transactions = [
+      { transactionId: 1, accountKey: 'plaid:1', tagIds: [501], date: '2026-08-05', amount: 50, type: 'actual' },
+      { transactionId: 2, accountKey: 'plaid:1', tagIds: [501], date: '2026-08-06', amount: -20, type: 'actual' },
+      { transactionId: 3, accountKey: 'plaid:2', tagIds: [501], date: '2026-08-06', amount: 999, type: 'actual' },
+    ];
+    const service = new OperationalFundService(repository, { getTransactions: async () => transactions });
+    expect((await service.getProjection('plaid:1', '2026-08-13', '2026-08-13')).currentReservedCents).toBe(3000);
+    repository.addExclusion(saved.id, 2);
+    expect((await service.getProjection('plaid:1', '2026-08-13', '2026-08-13')).currentReservedCents).toBe(5000);
+    const register = await service.getRegister(saved.id, '2026-08-13');
+    expect(register.find(row => row.transactionId === 2).excluded).toBe(true);
+    expect(register.find(row => row.transactionId === 3)).toBeUndefined();
+  });
+
+  it('reports cross-fund category/tag overlap instead of drawing down two funds', async () => {
+    const categoryFund = repository.create(fund({ name: 'Category fund', fundType: 'reserved', allocationCents: 10000, createdOn: '2026-08-01' }));
+    repository.create(fund({ name: 'Tag fund', fundType: 'reserved', categoryIds: [], tagIds: [501], allocationCents: 10000, createdOn: '2026-08-01' }));
+    const service = new OperationalFundService(repository, { getTransactions: async () => [{ transactionId: 1, accountKey: 'plaid:1', date: '2026-08-12', amount: -25, categoryId: 10, tagIds: [501], type: 'actual' }] });
+    await expect(service.getProjection('plaid:1', '2026-08-13', '2026-08-13')).rejects.toThrow(/matches more than one fund/);
+    repository.addExclusion(categoryFund.id, 1);
+    expect((await service.getProjection('plaid:1', '2026-08-13', '2026-08-13')).currentReservedCents).toBe(17500);
+  });
+
   it('retains scheduled allocation history across skipped periods, repeated reads and restart only', async () => {
     const scheduled = repository.create(fund({ categoryIds: [] }));
     const sinking = repository.create(fund({

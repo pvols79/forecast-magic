@@ -1,4 +1,5 @@
 import { addDays, getPeriodForDate } from './periods.js';
+import { matchesFundSelectors } from './fundMatching.js';
 
 const fundTypeFor = fund => fund.fundType || (fund.periodType === 'all-time' ? 'reserved' : 'operating');
 export const getFundSpendingStart = fund => fund.includePriorSpending ? '1900-01-01' : fund.createdOn || fund.createdAt?.slice(0, 10);
@@ -15,7 +16,7 @@ export const isOpeningFundAllocation = (fund, allocation) => fundTypeFor(fund) =
 const isMappedTransaction = (fund, transaction, startDate, endDate, anchorDate) => {
   if (transaction.accountKey !== fund.accountKey) return false;
   if (fundTypeFor(fund) === 'sinking' && getFundSpendingStart(fund) && transaction.date < getFundSpendingStart(fund)) return false;
-  if (!fund.categoryIds.includes(Number(transaction.categoryId))) return false;
+  if (!matchesFundSelectors(fund, transaction)) return false;
   if (transaction.amount === 0) return false;
   if (transaction.date < startDate || transaction.date > endDate) return false;
   if (transaction.type === 'pending' && transaction.date < anchorDate) return false;
@@ -24,7 +25,7 @@ const isMappedTransaction = (fund, transaction, startDate, endDate, anchorDate) 
 
 const isFutureMappedTransaction = (fund, transaction, date) =>
   transaction.accountKey === fund.accountKey &&
-  fund.categoryIds.includes(Number(transaction.categoryId)) &&
+  matchesFundSelectors(fund, transaction) &&
   !fund.excludedTransactionIds.includes(String(transaction.transactionId)) &&
   transaction.amount !== 0 &&
   transaction.date === date &&
@@ -216,12 +217,31 @@ const publicFundState = (fund, state) => ({
   targetCents: fund.targetCents,
   householdVisible: fund.householdVisible,
   categoryIds: fund.categoryIds,
+  tagIds: fund.tagIds || [],
+  matchMode: fund.matchMode || 'any',
   transactions: state.periodTransactions,
   allocationHistory: state.allocationHistory || [],
 });
 
 export const projectOperationalFunds = ({ funds, checkpoints = new Map(), transactions = [], accountKey, anchorDate, endDate }) => {
   const activeFunds = funds.filter(fund => fund.active && (!accountKey || fund.accountKey === accountKey));
+  // A category on one fund and a tag on another can collide even when each
+  // selector has a unique owner. Never silently draw down two reservations.
+  for (const transaction of transactions) {
+    const matches = activeFunds.filter(fund => {
+      if (fund.excludedTransactionIds?.includes(String(transaction.transactionId))) return false;
+      if (transaction.date > anchorDate) return transaction.date <= endDate && isFutureMappedTransaction(fund, transaction, transaction.date);
+      const period = getPeriodForDate(fund, anchorDate);
+      const start = fund.includePriorSpending ? getFundSpendingStart(fund)
+        : checkpoints.get(fund.id)?.periodStart || period.start;
+      return isMappedTransaction(fund, transaction, start, anchorDate, anchorDate);
+    });
+    if (matches.length > 1) {
+      const error = new Error(`Transaction ${transaction.transactionId || transaction.id} (${transaction.date}, ${transaction.description || 'transaction'}) matches more than one fund: ${matches.map(fund => fund.name).join(', ')}. Change the category/tag rules or exclude it from all but one fund.`);
+      error.status = 409;
+      throw error;
+    }
+  }
   const currentStates = activeFunds.map(fund => ({
     fund,
     state: calculateCurrentFundState(fund, checkpoints.get(fund.id), transactions, anchorDate),

@@ -7,6 +7,7 @@ export const createLunchMoneyRouter = (service = new LunchMoneyService()) => {
   router.get('/manual-accounts', async (request, response) => response.json({ accounts: await service.getManualAccounts() }));
   router.get('/plaid-accounts', async (request, response) => response.json({ accounts: await service.getPlaidAccounts() }));
   router.get('/categories', requireAdmin, async (request, response) => response.json({ categories: await service.getCategories() }));
+  router.get('/tags', requireAdmin, async (request, response) => response.json({ tags: await service.getTags() }));
   router.get('/transactions', async (request, response) => response.json({
     transactions: await service.getTransactions(request.query.startDate, request.query.endDate, request.query.anchorDate),
   }));

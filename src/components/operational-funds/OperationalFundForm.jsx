@@ -9,7 +9,7 @@ import { createFundFormValue, toggleSinkingAutoAllocation } from './fundFormStat
 const weekdays = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
-const OperationalFundForm = ({ accountKey, categories, funds = [], fund, onSave, onCancel, saving }) => {
+const OperationalFundForm = ({ accountKey, categories, tags = [], funds = [], fund, onSave, onCancel, saving }) => {
   const [value, setValue] = useState(() => createFundFormValue(accountKey, fund));
 
   useEffect(() => setValue(createFundFormValue(accountKey, fund)), [fund, accountKey]);
@@ -216,15 +216,35 @@ const OperationalFundForm = ({ accountKey, categories, funds = [], fund, onSave,
               </Stack>
             </CheckboxGroup>
           </Box>
-          <ChakraText fontSize="xs" color="gray.500" mt={1}>Categories are optional for Reserved and Sinking Funds.</ChakraText>
+          <ChakraText fontSize="xs" color="gray.500" mt={1}>Select categories, tags, or both. Leave both empty for a fund you manage manually.</ChakraText>
         </FormControl>
         <FormControl>
-          <FormLabel>Spending included in this fund</FormLabel>
+          <FormLabel>Lunch Money Tags</FormLabel>
+          <Box maxH="190px" overflowY="auto" borderWidth="1px" borderRadius="md" p={3}>
+            <CheckboxGroup value={value.tagIds.map(String)} onChange={ids => set('tagIds', ids.map(Number))}>
+              <Stack spacing={2}>
+                {[...tags, ...value.tagIds.filter(id => !tags.some(tag => Number(tag.id) === id)).map(id => ({ id, name: `Tag #${id} (no longer available)` }))].map(tag =>
+                  <Checkbox key={tag.id} value={String(tag.id)}>{tag.name}</Checkbox>)}
+                {!tags.length && !value.tagIds.length && <ChakraText fontSize="sm" color="gray.500">No Lunch Money tags available.</ChakraText>}
+              </Stack>
+            </CheckboxGroup>
+          </Box>
+        </FormControl>
+        {value.categoryIds.length > 0 && value.tagIds.length > 0 && <FormControl>
+          <FormLabel>When categories and tags are selected</FormLabel>
+          <Select value={value.matchMode} onChange={event => set('matchMode', event.target.value)}>
+            <option value="any">Match a selected category OR a selected tag</option>
+            <option value="all">Require a selected category AND a selected tag</option>
+          </Select>
+        </FormControl>}
+        <ChakraText fontSize="sm" color="gray.500">Matching spending reduces the fund; matching deposits and refunds increase it. A transaction counts once per fund even if multiple categories or tags match. Within the selected tags, any one tag is enough. Categories and tags belong to one active fund per account.</ChakraText>
+        <FormControl>
+          <FormLabel>Transaction history included in this fund</FormLabel>
           <Select value={value.includePriorSpending ? 'all' : 'since-created'} onChange={event => set('includePriorSpending', event.target.value === 'all')}>
             <option value="since-created">Since fund creation</option>
-            <option value="all">All category history</option>
+            <option value="all">All matching category / tag history</option>
           </Select>
-          <ChakraText fontSize="sm" color="gray.500" mt={2}>All category history includes earlier purchases and refunds from this bank account in both the register and balance. Excluded transactions stay excluded. It does not create older automatic allocations. Operating funds still follow their period and rollover rules.</ChakraText>
+          <ChakraText fontSize="sm" color="gray.500" mt={2}>All matching history includes earlier purchases, deposits, and refunds from this bank account in both the register and balance. Excluded transactions stay excluded. It does not create older automatic allocations. Operating funds still follow their period and rollover rules.</ChakraText>
         </FormControl>
         <HStack spacing={8}>
           <FormControl display="flex" alignItems="center">

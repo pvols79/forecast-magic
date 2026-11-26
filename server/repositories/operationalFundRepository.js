@@ -45,6 +45,8 @@ const hydrateFund = (db, row) => {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     categoryIds,
+    tagIds: db.prepare('SELECT tag_id FROM operational_fund_tags WHERE fund_id = ? ORDER BY tag_id').all(row.id).map(tag => Number(tag.tag_id)),
+    matchMode: row.match_mode || 'any',
     excludedTransactionIds,
   };
 };
@@ -79,6 +81,26 @@ const replaceCategories = (db, fundId, categoryIds) => {
   for (const categoryId of categoryIds) insert.run(fundId, categoryId);
 };
 
+const replaceTags = (db, fundId, tagIds) => {
+  db.prepare('DELETE FROM operational_fund_tags WHERE fund_id = ?').run(fundId);
+  const insert = db.prepare('INSERT INTO operational_fund_tags (fund_id, tag_id) VALUES (?, ?)');
+  for (const tagId of tagIds) insert.run(fundId, tagId);
+};
+
+const validateTagOwnership = (db, fund, excludedFundId = -1) => {
+  if (!fund.active || !fund.tagIds.length) return;
+  const conflict = db.prepare(`SELECT f.name, t.tag_id FROM operational_fund_tags t
+    JOIN operational_funds f ON f.id = t.fund_id
+    WHERE f.account_key = ? AND f.active = 1 AND f.id != ?
+      AND t.tag_id IN (${fund.tagIds.map(() => '?').join(',')}) LIMIT 1`)
+    .get(fund.accountKey, excludedFundId, ...fund.tagIds);
+  if (conflict) {
+    const error = new Error(`Tag ${conflict.tag_id} is already assigned to ${conflict.name} in this account.`);
+    error.status = 409;
+    throw error;
+  }
+};
+
 const normalizeInput = input => {
   const fundType = input.fundType || (input.periodType === 'all-time' ? 'reserved' : 'operating');
   const allocationMode = fundType === 'reserved' ? 'manual' : (input.allocationMode || 'scheduled');
@@ -108,6 +130,8 @@ const normalizeInput = input => {
     createdOn: input.createdOn || input.createdAt?.slice(0, 10) || new Date().toISOString().slice(0, 10),
     includePriorSpending: Boolean(input.includePriorSpending),
     categoryIds: [...new Set((input.categoryIds || []).map(Number))],
+    tagIds: [...new Set((input.tagIds || []).map(Number))],
+    matchMode: input.matchMode || 'any',
   };
 };
 
@@ -125,6 +149,8 @@ const validateInput = fund => {
   if (fund.rolloverMode === 'capped' && (!Number.isInteger(fund.rolloverCapCents) || fund.rolloverCapCents < 0)) throw new Error('A non-negative rollover cap is required.');
   if (fund.targetCents != null && (!Number.isInteger(fund.targetCents) || fund.targetCents < 0)) throw new Error('Target must be a non-negative amount.');
   if (fund.categoryIds.some(id => !Number.isInteger(id))) throw new Error('Category IDs must be integers.');
+  if (fund.tagIds.some(id => !Number.isInteger(id) || id <= 0)) throw new Error('Tag IDs must be positive integers.');
+  if (!['any', 'all'].includes(fund.matchMode)) throw new Error('Choose whether category and tag groups match either or both.');
 };
 
 export class OperationalFundRepository {
@@ -163,6 +189,7 @@ export class OperationalFundRepository {
     validateInput(fund);
     const parentId = this.validateHierarchy(null, { ...input, accountKey: fund.accountKey });
     return withTransaction(db => {
+      validateTagOwnership(db, fund);
       if (fund.active) {
         const conflict = findCategoryConflict(db, fund.accountKey, fund.categoryIds);
         if (conflict) {
@@ -192,6 +219,8 @@ export class OperationalFundRepository {
       db.prepare('UPDATE operational_funds SET parent_id = ?, occasion_date = ?, purchased_on = ? WHERE id = ?').run(parentId, input.occasionDate || null, input.purchasedOn || null, id);
       db.prepare('UPDATE operational_funds SET include_prior_spending = ? WHERE id = ?').run(fund.includePriorSpending ? 1 : 0, id);
       replaceCategories(db, id, fund.categoryIds);
+      replaceTags(db, id, fund.tagIds);
+      db.prepare('UPDATE operational_funds SET match_mode = ? WHERE id = ?').run(fund.matchMode, id);
       return hydrateFund(db, db.prepare('SELECT * FROM operational_funds WHERE id = ?').get(id));
     });
   }
@@ -208,6 +237,7 @@ export class OperationalFundRepository {
     if (children.length && fund.accountKey !== existing.accountKey) throw new Error('Move sub-funds before changing the parent account.');
 
     return withTransaction(db => {
+      validateTagOwnership(db, fund, Number(id));
       if (fund.active) {
         const conflict = findCategoryConflict(db, fund.accountKey, fund.categoryIds, Number(id));
         if (conflict) {
@@ -242,6 +272,8 @@ export class OperationalFundRepository {
       }
       db.prepare('UPDATE operational_funds SET include_prior_spending = ? WHERE id = ?').run(fund.includePriorSpending ? 1 : 0, id);
       replaceCategories(db, Number(id), fund.categoryIds);
+      replaceTags(db, Number(id), fund.tagIds);
+      db.prepare('UPDATE operational_funds SET match_mode = ? WHERE id = ?').run(fund.matchMode, id);
       const periodConfigurationChanged =
         existing.includePriorSpending !== fund.includePriorSpending ||
         existing.accountKey !== fund.accountKey ||
@@ -282,6 +314,7 @@ export class OperationalFundRepository {
       for (const row of rows) {
         if (!row.archived_was_active) continue;
         const fund = hydrateFund(db, row);
+        validateTagOwnership(db, { ...fund, active: true }, fund.id);
         const conflict = findCategoryConflict(db, fund.accountKey, fund.categoryIds, fund.id);
         if (conflict) throw new Error(`Category ${conflict.category_id} is now assigned to ${conflict.fund_name}. Restore requires resolving this category conflict.`);
       }

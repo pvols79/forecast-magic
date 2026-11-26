@@ -2,6 +2,7 @@ import { getPeriodForDate } from '../domain/periods.js';
 import { getFundSpendingStart, isOpeningFundAllocation, projectOperationalFunds, rollUpFundProjection } from '../domain/operationalFunds.js';
 import { OperationalFundRepository } from '../repositories/operationalFundRepository.js';
 import { LunchMoneyService } from './lunchMoneyService.js';
+import { matchesFundSelectors } from '../domain/fundMatching.js';
 
 const earliest = dates => dates.reduce((minimum, date) => !minimum || date < minimum ? date : minimum, null);
 
@@ -58,7 +59,7 @@ export class OperationalFundService {
           amount: entry.allocationCents / 100, removed: Boolean(entry.removedAt),
         })),
         ...transactions.filter(row => row.accountKey === item.accountKey
-          && item.categoryIds.includes(Number(row.categoryId)) && row.date >= getFundSpendingStart(item)
+          && matchesFundSelectors(item, row) && row.date >= getFundSpendingStart(item)
           && row.date <= cutoff && ['actual', 'pending'].includes(row.type)).map(row => ({
           ...row, fundId: item.id, subFundName: item.name,
           excluded: item.excludedTransactionIds.includes(String(row.transactionId)),

@@ -7,7 +7,7 @@ import { formatCurrency } from '../../utils';
 
 const transactionStatus = transaction => {
   if (transaction.excluded) return { label: 'Excluded', colorScheme: 'gray' };
-  if (transaction.amount > 0) return { label: 'Refund', colorScheme: 'blue' };
+  if (transaction.amount > 0) return { label: 'Deposit / refund', colorScheme: 'blue' };
   if (transaction.overBudgetCents > 0) return { label: 'Over budget', colorScheme: 'red' };
   return { label: 'Covered', colorScheme: 'green' };
 };
