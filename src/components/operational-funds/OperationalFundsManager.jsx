@@ -13,6 +13,8 @@ import {
   includeFundTransaction, updateOperationalFund, removeFundAllocation,
 } from '../../backendApi';
 import OperationalFundForm from './OperationalFundForm';
+import FundCarousel from './FundCarousel';
+import AllocationHistory from './AllocationHistory';
 
 const money = cents => formatCurrency((cents || 0) / 100);
 const OperationalFundsManager = ({ accountKey, currentStates, onChanged, compact = false, onOpenFunds, initialSelectedId = null }) => {
@@ -118,29 +120,27 @@ const OperationalFundsManager = ({ accountKey, currentStates, onChanged, compact
   const rows = register.filter(row => (!childFilter || String(row.fundId) === childFilter) && (scope === 'all' || !state?.periodStart || row.date >= state.periodStart));
   const roots = useMemo(() => funds.filter(fund => Boolean(fund.archivedAt) === showArchived && (!fund.parentId || (showArchived && !funds.find(parent => parent.id === fund.parentId)?.archivedAt))), [funds, showArchived]);
   useEffect(() => {
-    setSelectedId(current => roots.some(fund => fund.id === current) ? current : roots[0]?.id || null);
+    setSelectedId(current => roots.some(fund => fund.id === current) ? current : null);
     setChildFilter('');
   }, [roots]);
   return (
+    <>
     <Box bg={bg} borderRadius="md" borderWidth="1px" p={{ base: 4, lg: 5 }} minH={compact ? undefined : '65vh'}>
       <HStack justify="space-between" mb={4} flexWrap="wrap" gap={2}>
         <Box><Heading size="md">{compact ? 'Fund Allocations' : 'Funds'}</Heading>
           {!compact && <Text color="gray.500" fontSize="sm">Plan the occasion. Track the spending. Keep the history.</Text>}
         </Box>
-        <HStack>{!compact && <Button variant="outline" onClick={() => setShowArchived(value => !value)}>{showArchived ? 'View current funds' : 'View archived funds'}</Button>}{compact && <Button onClick={() => onOpenFunds?.()}>Open Funds</Button>}<Button colorScheme="blue" leftIcon={<FaPlus />} onClick={() => edit(null)}>Create Fund</Button></HStack>
+        <HStack flexWrap="wrap" gap={2}>{!compact && <Button variant="outline" onClick={() => setShowArchived(value => !value)}>{showArchived ? 'View current funds' : 'View archived funds'}</Button>}{compact && <Button onClick={() => onOpenFunds?.()}>Open Funds</Button>}<Button colorScheme="blue" leftIcon={<FaPlus />} onClick={() => edit(null)}>Create Fund</Button></HStack>
       </HStack>
       {error && <Alert status="error" mb={4}><AlertIcon />{error}</Alert>}
       {loading ? <Spinner /> : roots.length === 0 ? <Text color="gray.500">{showArchived ? 'No archived funds.' : 'Create a fund to start reserving money.'}</Text> : <>
-        <Box overflowX="auto" maxH={compact ? undefined : '230px'} mb={5}>
-          <Table size="sm" variant="simple">
-            <Thead position="sticky" top={0} bg={bg} zIndex={1}><Tr><Th>Fund</Th><Th>Type</Th><Th isNumeric>{showArchived ? 'Balance at archive' : 'Remaining / reserved'}</Th><Th isNumeric>Goal</Th><Th>Sub-funds</Th></Tr></Thead>
-            <Tbody>{roots.map(fund => <Tr key={fund.id} bg={!compact && selectedId === fund.id ? mutedBg : undefined} opacity={fund.active ? 1 : 0.6}>
-              <Td><Button variant="link" onClick={() => { setSelectedId(fund.id); setChildFilter(''); if (compact) onOpenFunds?.(fund.id); }}>{fund.name}</Button>{!fund.active && <Badge ml={2}>{fund.archivedAt ? 'Archived' : 'Disabled'}</Badge>}</Td>
-              <Td textTransform="capitalize">{fund.fundType}</Td><Td isNumeric fontWeight="bold">{money(fund.archivedAt ? fund.archivedRemainingCents : states.get(fund.id)?.remainingCents)}</Td><Td isNumeric>{fund.targetCents == null ? '—' : money(fund.targetCents)}</Td><Td>{funds.filter(child => child.parentId === fund.id && Boolean(child.archivedAt) === showArchived).length || '—'}</Td>
-            </Tr>)}</Tbody>
-          </Table>
-        </Box>
-        {!compact && selected && <VStack align="stretch" spacing={5}>
+        <FundCarousel funds={roots} states={states} selectedId={selectedId} allFunds={funds} onSelect={id => {
+          setSelectedId(id); setChildFilter(''); if (compact) onOpenFunds?.(id);
+        }} />
+        {!compact && !selected && <Box mt={5} p={10} borderWidth="1px" borderRadius="md" textAlign="center">
+          <Heading size="sm">Select a fund</Heading><Text color="gray.500" mt={2}>Its sub-funds, activity, and money controls will appear here.</Text>
+        </Box>}
+        {!compact && selected && <VStack align="stretch" spacing={5} mt={5} p={{ base: 3, md: 5 }} borderWidth="1px" borderRadius="md">
           <HStack justify="space-between" flexWrap="wrap" gap={2}>
             <Box><Heading size="md">{selected.name}</Heading><Text fontSize="sm" color="gray.500">{state?.periodEnd ? `${state.periodStart} – ${state.periodEnd}` : `Since ${selected.createdOn}`}</Text></Box>
             <HStack flexWrap="wrap"><Button size="sm" isDisabled={Boolean(selected.archivedAt)} onClick={addChild}>Add sub-fund</Button><Button size="sm" isDisabled={Boolean(selected.archivedAt) || !members.some(member => member.fundType !== 'operating')} onClick={() => { setAdjustment({ amount: '', note: '', fundId: String(members.find(member => member.fundType !== 'operating')?.id || ''), transferToId: '' }); adjust.onOpen(); }}>Adjust / move money</Button><Button size="sm" variant="outline" onClick={() => edit(selected)}>Fund settings</Button></HStack>
@@ -163,7 +163,7 @@ const OperationalFundsManager = ({ accountKey, currentStates, onChanged, compact
             })}</Tbody></Table></Box>}
           </Box>
           <Box>
-            <HStack justify="space-between" mb={3} flexWrap="wrap" gap={2}><Heading size="sm">Activity register</Heading><HStack><Select aria-label="Register period" size="sm" value={scope} onChange={event => setScope(event.target.value)}><option value="period">Current period</option><option value="all">{selected.includePriorSpending ? 'All category history' : 'Since fund creation'}</option></Select>{children.length > 0 && <Select aria-label="Register sub-fund" size="sm" value={childFilter} onChange={event => setChildFilter(event.target.value)}><option value="">Entire fund</option>{members.map(member => <option key={member.id} value={member.id}>{member.id === selectedId ? 'Unassigned' : member.name}</option>)}</Select>}</HStack></HStack>
+            <HStack justify="space-between" mb={3} flexWrap="wrap" gap={2}><Heading size="sm">Activity register</Heading><HStack flexWrap="wrap" maxW="100%"><Select aria-label="Register period" size="sm" value={scope} onChange={event => setScope(event.target.value)}><option value="period">Current period</option><option value="all">{selected.includePriorSpending ? 'All category history' : 'Since fund creation'}</option></Select>{children.length > 0 && <Select aria-label="Register sub-fund" size="sm" value={childFilter} onChange={event => setChildFilter(event.target.value)}><option value="">Entire fund</option>{members.map(member => <option key={member.id} value={member.id}>{member.id === selectedId ? 'Unassigned' : member.name}</option>)}</Select>}</HStack></HStack>
             <Text fontSize="sm" color="gray.500" mb={3}>{selected.includePriorSpending ? 'Earlier matching category spending is included in this fund’s balance. ' : 'Spending before fund creation is not included. Change this in Fund settings if needed. '}Funding, adjustments, spending, and refunds. Adjustments only change reserved money; they do not create bank transactions. Mark a gift complete in its sub-fund settings after checking the category.</Text>
             {registerLoading ? <Spinner /> : !rows.length ? <Text color="gray.500">No activity in this period.</Text> : <Box overflowX="auto" maxH="60vh"><Table size="sm"><Thead position="sticky" top={0} bg={bg} zIndex={1}><Tr><Th>Date</Th><Th>Fund</Th><Th>Activity</Th><Th>Type</Th><Th isNumeric>Amount</Th><Th /></Tr></Thead><Tbody>{rows.map(row => <Tr key={`${row.fundId}:${row.transactionId}`} opacity={row.excluded || row.removed ? 0.5 : 1}><Td whiteSpace="nowrap">{row.date}</Td><Td>{row.subFundName}</Td><Td>{row.description}</Td><Td><Badge>{row.removed ? 'Removed' : row.excluded ? 'Excluded' : row.type}</Badge></Td><Td isNumeric whiteSpace="nowrap" textDecoration={row.removed ? 'line-through' : undefined} color={row.amount > 0 ? 'green.500' : undefined}>{row.amount > 0 ? '+' : ''}{formatCurrency(row.amount)}</Td><Td>{!selected.archivedAt && !funds.find(fund => fund.id === row.fundId)?.archivedAt && row.type === 'allocation' && !row.removed && <Button size="xs" colorScheme="red" variant="outline" isDisabled={saving} onClick={() => removeAllocation(row)}>Remove allocation</Button>}{!selected.archivedAt && !funds.find(fund => fund.id === row.fundId)?.archivedAt && ['actual', 'pending'].includes(row.type) && <Button size="xs" onClick={() => toggleExclusion(row)}>{row.excluded ? 'Re-include' : 'Exclude'}</Button>}</Td></Tr>)}</Tbody></Table></Box>}
           </Box>
@@ -172,6 +172,8 @@ const OperationalFundsManager = ({ accountKey, currentStates, onChanged, compact
       <Drawer isOpen={form.isOpen} onClose={form.onClose} size="lg"><DrawerOverlay /><DrawerContent><DrawerCloseButton /><DrawerHeader>{editingFund?.id ? 'Fund settings' : editingFund?.parentId ? 'Add sub-fund' : 'Create fund'}</DrawerHeader><DrawerBody>{error && <Alert status="error" mb={4}><AlertIcon />{error}</Alert>}{!editingFund?.archivedAt && <OperationalFundForm accountKey={accountKey} categories={categories} funds={funds} fund={editingFund} onSave={save} onCancel={form.onClose} saving={saving} />}{editingFund?.id && <Button mt={6} mr={3} colorScheme="blue" isLoading={saving} onClick={() => setArchive(editingFund)}>{editingFund.archivedAt ? 'Restore fund' : 'Archive fund'}</Button>}{editingFund?.id && <Button mt={6} colorScheme="red" variant="outline" onClick={() => remove(editingFund)}>Delete fund</Button>}</DrawerBody></DrawerContent></Drawer>
       <Drawer isOpen={adjust.isOpen} onClose={adjust.onClose} size="md"><DrawerOverlay /><DrawerContent><DrawerCloseButton /><DrawerHeader>Adjust reserved money</DrawerHeader><DrawerBody>{error && <Alert status="error" mb={4}><AlertIcon />{error}</Alert>}<Box as="form" onSubmit={saveAdjustment}><VStack spacing={4} align="stretch"><Text>Record a deposit or withdrawal from the fund without changing the opening balance. Use a negative amount to remove money.</Text><FormControl isRequired><FormLabel>Fund</FormLabel><Select value={adjustment.fundId} onChange={event => setAdjustment({ ...adjustment, fundId: event.target.value, transferToId: '' })}>{members.filter(member => member.fundType !== 'operating').map(member => <option value={member.id} key={member.id}>{member.name}</option>)}</Select></FormControl><FormControl isRequired><FormLabel>Amount (+ add / − remove)</FormLabel><Input type="number" step="0.01" required value={adjustment.amount} onChange={event => setAdjustment({ ...adjustment, amount: event.target.value })} /></FormControl><FormControl><FormLabel>Move removed money to (optional)</FormLabel><Select value={adjustment.transferToId} onChange={event => setAdjustment({ ...adjustment, transferToId: event.target.value })}><option value="">Adjustment only — no destination</option>{funds.filter(member => member.id !== Number(adjustment.fundId) && member.fundType !== 'operating' && !member.archivedAt && member.active && (!member.parentId || funds.find(parent => parent.id === member.parentId)?.active)).map(member => <option value={member.id} key={member.id}>{member.parentId ? `${funds.find(parent => parent.id === member.parentId)?.name} / ` : ''}{member.name}</option>)}</Select><Text fontSize="sm" color="gray.500" mt={2}>{adjustment.transferToId ? 'Enter a negative amount. The same amount will be added to the destination fund.' : 'Adjustment only changes this fund. Removing money releases it to available-to-spend; adding money reserves it. No bank transaction is created.'}</Text></FormControl><FormControl isRequired><FormLabel>Reason</FormLabel><Input required value={adjustment.note} onChange={event => setAdjustment({ ...adjustment, note: event.target.value })} /></FormControl><Button type="submit" colorScheme="blue" isLoading={saving}>Record entry</Button></VStack></Box></DrawerBody></DrawerContent></Drawer>
     </Box>
+    {!compact && <AllocationHistory accountKey={accountKey} currentStates={currentStates} revision={revision} onRemove={removeAllocation} saving={saving} />}
+    </>
   );
 };
 export default OperationalFundsManager;

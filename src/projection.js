@@ -59,6 +59,7 @@ export const projectCashFlow = (accounts, cashFlowEvents, selectedAccountId, pro
   const projectionStartDate = new Date(`${anchorDate}T00:00:00Z`);
   const projectionEndDate = new Date(projectionStartDate);
   projectionEndDate.setUTCMonth(projectionStartDate.getUTCMonth() + projectionHorizonMonths);
+  if (options.endDate) projectionEndDate.setTime(new Date(`${options.endDate}T00:00:00Z`).getTime());
 
   const selectedApiEvents = cashFlowEvents
     .filter(event => eventAffectsSelectedAccount(event, selectedAccount))
@@ -171,5 +172,18 @@ export const projectCashFlow = (accounts, cashFlowEvents, selectedAccountId, pro
     .reduce((sum, event) => sum + parseFloat(event.amount), 0);
   openingBalance.projectedLedgerBalance = dailyBalances[0]?.balance ?? startingBalance;
 
-  return { dailyBalances, keyEvents, negativeBalanceAlerts, historicalMissedEvents, openingBalance };
+  const openingSet = new Set(openingAdjustmentEvents);
+  const projectedSet = new Set(projectedTransactions);
+  const selectedSet = new Set(selectedApiEvents);
+  const eventDecisions = cashFlowEvents.filter(event => eventAffectsSelectedAccount(event, selectedAccount))
+    .map(event => ({
+      ...event,
+      modelTreatment: openingSet.has(event) ? 'opening'
+        : projectedSet.has(event) ? 'projected'
+          : selectedSet.has(event) ? 'recurring-satisfied'
+            : event.date > getUTCDateString(projectionEndDate) ? 'outside-horizon' : 'included-in-bank',
+      todayImpact: openingSet.has(event) || (projectedSet.has(event) && event.date === anchorDate)
+        ? Number(event.amount) : 0,
+    }));
+  return { dailyBalances, keyEvents, negativeBalanceAlerts, historicalMissedEvents, openingBalance, eventDecisions };
 };

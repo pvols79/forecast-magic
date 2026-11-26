@@ -10,8 +10,10 @@ export const createLunchMoneyRouter = (service = new LunchMoneyService()) => {
   router.get('/transactions', async (request, response) => response.json({
     transactions: await service.getTransactions(request.query.startDate, request.query.endDate, request.query.anchorDate),
   }));
-  router.get('/recurring', async (request, response) => response.json({
-    events: await service.getRecurring(request.query.startDate, request.query.endDate),
-  }));
+  router.get('/recurring', async (request, response) => response.json(
+    request.query.includeOccurrences === 'true'
+      ? await service.getRecurringData(request.query.startDate, request.query.endDate)
+      : { events: await service.getRecurring(request.query.startDate, request.query.endDate) }
+  ));
   return router;
 };

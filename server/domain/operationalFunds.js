@@ -352,7 +352,8 @@ export const rollUpFundProjection = (projection, funds) => {
       };
     });
   };
-  const annotations = rows => rows.map(row => ({ ...row, fundId: rootId(row.fundId), name: byId.get(rootId(row.fundId))?.name || row.name }));
+  const annotations = rows => rows.map(row => ({ ...row, sourceFundId: row.fundId, sourceFundName: row.name,
+    fundId: rootId(row.fundId), name: byId.get(rootId(row.fundId))?.name || row.name }));
   return { ...projection, currentFunds: group(projection.currentFunds), days: projection.days.map(day => ({ ...day,
     funds: group(day.funds), boundaryAnnotations: annotations(day.boundaryAnnotations), transactionDrawdowns: annotations(day.transactionDrawdowns),
   })) };

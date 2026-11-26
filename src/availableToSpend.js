@@ -17,6 +17,7 @@ export const applyOperationalFunds = (ledgerProjection, operationalFundProjectio
       balance: day.balance - reservedOperationalFunds,
       operationalFunds: fundDay.funds,
       operationalFundAnnotations: fundDay.boundaryAnnotations,
+      operationalFundDrawdowns: fundDay.transactionDrawdowns || [],
     };
   });
 

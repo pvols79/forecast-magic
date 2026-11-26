@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Alert, Box, Button, Container, Flex, Heading, HStack, Icon, IconButton, Image,
   SimpleGrid, Spinner, Text as ChakraText, VStack, useColorMode, useColorModeValue,
@@ -20,9 +20,12 @@ import OperationalFundsManager from './components/operational-funds/OperationalF
 import AdminWorkflow from './components/AdminWorkflow';
 import DuplicateReview from './components/DuplicateReview';
 import ShareReportButton from './components/ShareReportButton';
-import { getAccounts, getRecurringItems, getPlaidAccounts, getTransactions } from './lunchmoney';
+import { getAccounts, getRecurringData, getPlaidAccounts, getTransactions } from './lunchmoney';
 import { projectCashFlow } from './projection';
 import { applyOperationalFunds } from './availableToSpend';
+import { addDays } from '../server/domain/periods';
+import { getNinetyDayLow } from './forecastDetail';
+import ForecastDetail from './components/ForecastDetail';
 import {
   clearApiKey, getApiErrorMessage, getAuthStatus, getOperationalFundProjection,
   getSettings, loginAdmin, logoutAdmin, saveApiKey, updateTimezone,
@@ -67,6 +70,7 @@ function App() {
   const [activePage, setActivePage] = useState('forecast');
   const [fundRefresh, setFundRefresh] = useState(0);
   const [duplicateScanRequest, setDuplicateScanRequest] = useState(0);
+  const projectionRequest = useRef(0);
   const { colorMode, toggleColorMode } = useColorMode();
 
   const bg = useColorModeValue('brand.100', 'brand.900');
@@ -188,29 +192,44 @@ function App() {
 
   const handleGenerateProjection = useCallback(async () => {
     if (!selectedAccountId || !projectionHorizon || !settings?.timezone) return;
+    const requestId = ++projectionRequest.current;
     setLoading(true);
+    setProjection(null);
     setError(null);
     const startDate = getDateInTimezone(new Date(), settings.timezone);
     const endDate = addMonths(startDate, projectionHorizon);
+    const modelEndDate = [endDate, addDays(startDate, 90)].sort().at(-1);
+    const queryStartDate = recurringLookback(startDate);
 
     try {
-      const [recurringEvents, transactionEvents, fundProjection] = await Promise.all([
-        getRecurringItems(recurringLookback(startDate), endDate),
-        getTransactions(recurringLookback(startDate), endDate, startDate),
-        getOperationalFundProjection(selectedAccountId, startDate, endDate, !isAdminView),
+      const [recurringData, transactionEvents, fundProjection] = await Promise.all([
+        getRecurringData(queryStartDate, modelEndDate),
+        getTransactions(queryStartDate, modelEndDate, startDate),
+        getOperationalFundProjection(selectedAccountId, startDate, modelEndDate, !isAdminView),
       ]);
-      const ledgerProjection = projectCashFlow(
+      const events = [...transactionEvents, ...recurringData.events];
+      const build = throughDate => applyOperationalFunds(projectCashFlow(
         accounts,
-        [...transactionEvents, ...recurringEvents],
+        events,
         selectedAccountId,
         projectionHorizon,
-        { anchorDate: startDate }
-      );
-      setProjection(applyOperationalFunds(ledgerProjection, fundProjection));
+        { anchorDate: startDate, endDate: throughDate }
+      ), fundProjection);
+      const fullProjection = build(modelEndDate);
+      if (requestId !== projectionRequest.current) return;
+      setProjection({
+        ...(modelEndDate === endDate ? fullProjection : build(endDate)),
+        ninetyDayLow: getNinetyDayLow(fullProjection.dailyBalances, startDate),
+        forecastDetail: {
+          ...fullProjection, queryStartDate, queryEndDate: modelEndDate,
+          generatedAt: new Date().toISOString(),
+          recurringOccurrences: (recurringData.occurrences || []).filter(event => event.accountKey === selectedAccountId),
+        },
+      });
     } catch (projectionError) {
-      setError(`Error generating projection. ${getApiErrorMessage(projectionError)}`);
+      if (requestId === projectionRequest.current) setError(`Error generating projection. ${getApiErrorMessage(projectionError)}`);
     } finally {
-      setLoading(false);
+      if (requestId === projectionRequest.current) setLoading(false);
     }
   }, [accounts, fundRefresh, isAdminView, projectionHorizon, selectedAccountId, settings?.timezone]);
 
@@ -237,7 +256,7 @@ function App() {
             <BrandMark />
             <Heading as="h1" size="md">Forecast Magic</Heading>
           </Flex>
-          <HStack spacing={2}>
+          <HStack spacing={2} flexWrap="wrap" maxW="100%" rowGap={2}>
             {selectedAccountId && settings?.apiKeyConfigured && (
               <ShareReportButton
                 accountKey={selectedAccountId}
@@ -296,9 +315,10 @@ function App() {
               )}
             </VStack>
 
-            {selectedAccountId && <HStack role="navigation" aria-label="Main views">
+            {selectedAccountId && <HStack role="navigation" aria-label="Main views" flexWrap="wrap">
               <Button colorScheme={activePage === 'forecast' ? 'blue' : 'gray'} variant={activePage === 'forecast' ? 'solid' : 'ghost'} onClick={() => setActivePage('forecast')}>Forecast</Button>
               <Button colorScheme={activePage === 'funds' ? 'blue' : 'gray'} variant={activePage === 'funds' ? 'solid' : 'ghost'} onClick={() => setActivePage('funds')}>Funds</Button>
+              {isAdminView && authStatus?.isAdmin && <Button colorScheme={activePage === 'detail' ? 'blue' : 'gray'} variant={activePage === 'detail' ? 'solid' : 'ghost'} onClick={() => setActivePage('detail')}>Forecast Detail</Button>}
             </HStack>}
             {activePage === 'funds' && selectedAccountId ? (
               isAdminView && authStatus?.isAdmin ? (
@@ -306,10 +326,12 @@ function App() {
               ) : (
                 <HouseholdFundSummaries funds={projection?.operationalFunds} />
               )
+            ) : activePage === 'detail' && isAdminView && authStatus?.isAdmin && projection ? (
+              <ForecastDetail projection={projection.forecastDetail} account={selectedAccount} />
             ) : projection ? (
               <VStack spacing={4} w="100%" align="stretch">
                 {isAdminView && authStatus?.isAdmin && selectedAccount && (
-                  <AdminMetrics openingBalance={projection.openingBalance} />
+                  <AdminMetrics openingBalance={projection.openingBalance} ninetyDayLow={projection.ninetyDayLow} />
                 )}
                 {isAdminView && authStatus?.isAdmin && selectedAccount && (
                   <AdminWorkflow

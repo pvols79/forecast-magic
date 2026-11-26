@@ -120,6 +120,12 @@ Funds hidden from Household still reduce the Household available-to-spend value;
 
 ## Fund Allocations
 
+The Admin Funds tab uses swipeable fund buttons with combined parent/sub-fund reservations, type, goal, and automatic-allocation status. No fund is selected initially. Selecting one reveals its existing settings, sub-funds, money controls, and register. A separate account-wide automatic-allocation history defaults to the last 30 days, includes archived/disabled funds and removed entries, and does not change when selecting a fund. It shows recorded history, not future projections. Sub-funds continue to require their own funding; a parent's auto-allocation goal applies to its own funding.
+
+The Admin Forecast Detail tab traces the current synced Lunch Money balance through opening adjustments, today's forecast activity, and parent/sub-fund reservations to available to spend. Expand the sections to inspect LM transactions (including future-dated records), recurring decisions, fund funding/spending, and future allocation projections. Its source range is shown explicitly; it is a calculation report, not a bank reconciliation.
+
+The forecast header's **90 Day Lowest Balance** is the minimum available-to-spend balance from today through 90 days ahead, after all modeled activity and fund holds. The earliest low-point date is shown. This calculation always covers 90 days even when the chart horizon is shorter; future allocation projections do not become posted allocation history just because they were forecast.
+
 Fund Allocations are reservation policy, not transactions. They never create fake financial events and never appear in Upcoming.
 
 ```text

@@ -14,6 +14,21 @@ export class OperationalFundService {
     this.lunchMoneyService = lunchMoneyService;
   }
 
+  getAllocationHistory(accountKey, throughDate) {
+    const funds = this.repository.listByAccount(accountKey);
+    return funds.flatMap(fund => this.repository.getAllocationHistory(fund.id)
+      .filter(entry => entry.periodStart <= (fund.archivedOn || throughDate)
+        && entry.periodStart <= throughDate && !isOpeningFundAllocation(fund, entry))
+      .map(entry => ({
+        fundId: fund.id, fundName: fund.name,
+        parentName: funds.find(parent => parent.id === fund.parentId)?.name || null,
+        date: entry.periodStart, periodStart: entry.periodStart,
+        amount: entry.allocationCents / 100, removed: Boolean(entry.removedAt),
+        archived: Boolean(fund.archivedAt),
+      })))
+      .sort((a, b) => b.date.localeCompare(a.date) || b.fundId - a.fundId);
+  }
+
   async getRegister(id, throughDate) {
     const fund = this.repository.getById(id);
     if (!fund) return null;

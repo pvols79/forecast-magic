@@ -3,13 +3,13 @@ import { formatCurrency } from '../utils';
 
 const formatSignedCurrency = value => `${value >= 0 ? '+' : '-'}${formatCurrency(Math.abs(value))}`;
 
-const AdminMetrics = ({ openingBalance }) => {
+const AdminMetrics = ({ openingBalance, ninetyDayLow }) => {
   const bg = useColorModeValue('white', 'gray.700');
   if (!openingBalance) return null;
 
   return (
     <Box bg={bg} borderRadius="md" borderWidth="1px" boxShadow="sm" px={{ base: 4, lg: 5 }} py={3}>
-      <SimpleGrid columns={{ base: 2, md: 3, xl: 6 }} spacing={{ base: 3, lg: 5 }}>
+      <SimpleGrid columns={{ base: 2, md: 3, xl: 7 }} spacing={{ base: 3, lg: 5 }}>
         <Stat>
           <StatLabel>Synced Account Balance</StatLabel>
           <StatNumber fontSize="lg">{formatCurrency(openingBalance.syncedAccountBalance)}</StatNumber>
@@ -35,6 +35,12 @@ const AdminMetrics = ({ openingBalance }) => {
         <Stat>
           <StatLabel>Available to Spend</StatLabel>
           <StatNumber fontSize="lg">{formatCurrency(openingBalance.availableToSpend)}</StatNumber>
+        </Stat>
+        <Stat>
+          <StatLabel>90 Day Lowest Balance</StatLabel>
+          <StatNumber fontSize="lg" color={ninetyDayLow?.availableBalance < 0 ? 'red.500' : undefined}>{ninetyDayLow ? formatCurrency(ninetyDayLow.availableBalance) : '—'}</StatNumber>
+          <StatHelpText mb={0}>{ninetyDayLow?.date || 'Full 90-day projection unavailable'}</StatHelpText>
+          <StatHelpText mb={0}>After fund reservations · independent of chart horizon</StatHelpText>
         </Stat>
       </SimpleGrid>
     </Box>

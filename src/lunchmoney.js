@@ -107,6 +107,10 @@ export const getRecurringItems = async (startDate, endDate) => {
   return unwrapList(response.data, 'events');
 };
 
+export const getRecurringData = async (startDate, endDate) => (await axios.get(`${API_URL}/recurring`, {
+  params: { startDate, endDate, includeOccurrences: true },
+})).data;
+
 export const getPlaidAccounts = async () => {
   const response = await axios.get(`${API_URL}/plaid-accounts`);
   return unwrapList(response.data, 'accounts');

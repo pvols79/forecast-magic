@@ -39,11 +39,11 @@ export const sanitizeProjection = (projection, isAdmin) => {
       boundaryAnnotations: day.boundaryAnnotations.filter(annotation => {
         const fund = projection.currentFunds.find(candidate => candidate.id === annotation.fundId);
         return fund?.householdVisible;
-      }),
+      }).map(annotation => ({ ...annotation, sourceFundId: undefined, sourceFundName: undefined })),
       transactionDrawdowns: day.transactionDrawdowns.filter(drawdown => {
         const fund = projection.currentFunds.find(candidate => candidate.id === drawdown.fundId);
         return fund?.householdVisible;
-      }),
+      }).map(drawdown => ({ ...drawdown, sourceFundId: undefined, sourceFundName: undefined })),
     })),
   };
 };
@@ -67,6 +67,11 @@ export const createOperationalFundRouter = (
   router.get('/', requireAdmin, (request, response) => response.json({
     funds: repository.listByAccount(request.query.accountKey),
   }));
+
+  router.get('/allocation-history', requireAdmin, (request, response) => {
+    const today = getDateInTimezone(new Date(), settings.get('timezone') || 'UTC');
+    response.json({ throughDate: today, rows: service.getAllocationHistory(request.query.accountKey, today) });
+  });
 
   router.get('/:id/register', requireAdmin, async (request, response) => {
     const today = getDateInTimezone(new Date(), settings.get('timezone') || 'UTC');
