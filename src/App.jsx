@@ -188,6 +188,7 @@ function App() {
     await logoutAdmin();
     setAuthStatus(await getAuthStatus());
     setIsAdminView(false);
+    setActivePage('forecast');
   };
 
   const handleGenerateProjection = useCallback(async () => {
@@ -267,7 +268,7 @@ function App() {
               authStatus={authStatus}
               isAdminView={isAdminView}
               onAdminView={() => setIsAdminView(true)}
-              onHouseholdView={() => setIsAdminView(false)}
+              onHouseholdView={() => { setIsAdminView(false); setActivePage('forecast'); }}
               onLogin={handleLogin}
               onLogout={handleLogout}
             />
@@ -319,8 +320,22 @@ function App() {
               <Button colorScheme={activePage === 'forecast' ? 'blue' : 'gray'} variant={activePage === 'forecast' ? 'solid' : 'ghost'} onClick={() => setActivePage('forecast')}>Forecast</Button>
               <Button colorScheme={activePage === 'funds' ? 'blue' : 'gray'} variant={activePage === 'funds' ? 'solid' : 'ghost'} onClick={() => setActivePage('funds')}>Funds</Button>
               {isAdminView && authStatus?.isAdmin && <Button colorScheme={activePage === 'detail' ? 'blue' : 'gray'} variant={activePage === 'detail' ? 'solid' : 'ghost'} onClick={() => setActivePage('detail')}>Forecast Detail</Button>}
+              {isAdminView && authStatus?.isAdmin && <Button colorScheme={activePage === 'workflow' ? 'blue' : 'gray'} variant={activePage === 'workflow' ? 'solid' : 'ghost'} onClick={() => setActivePage('workflow')}>Admin Workflow</Button>}
             </HStack>}
-            {activePage === 'funds' && selectedAccountId ? (
+            {activePage === 'workflow' && isAdminView && authStatus?.isAdmin && selectedAccount ? (
+              <VStack key={selectedAccountId} spacing={4} w="100%" align="stretch">
+                <AdminWorkflow
+                  accountKey={selectedAccountId}
+                  onRefresh={handleRefresh}
+                  onRunDuplicates={() => setDuplicateScanRequest(value => value + 1)}
+                />
+                <DuplicateReview
+                  accountKey={selectedAccountId}
+                  onRefresh={handleRefresh}
+                  scanRequest={duplicateScanRequest}
+                />
+              </VStack>
+            ) : activePage === 'funds' && selectedAccountId ? (
               isAdminView && authStatus?.isAdmin ? (
                 <OperationalFundsManager key={selectedAccountId} accountKey={selectedAccountId} currentStates={projection?.operationalFunds} onChanged={() => setFundRefresh(value => value + 1)} />
               ) : (
@@ -332,20 +347,6 @@ function App() {
               <VStack spacing={4} w="100%" align="stretch">
                 {isAdminView && authStatus?.isAdmin && selectedAccount && (
                   <AdminMetrics openingBalance={projection.openingBalance} ninetyDayLow={projection.ninetyDayLow} />
-                )}
-                {isAdminView && authStatus?.isAdmin && selectedAccount && (
-                  <AdminWorkflow
-                    accountKey={selectedAccountId}
-                    onRefresh={handleRefresh}
-                    onRunDuplicates={() => setDuplicateScanRequest(value => value + 1)}
-                  />
-                )}
-                {isAdminView && authStatus?.isAdmin && selectedAccount && (
-                  <DuplicateReview
-                    accountKey={selectedAccountId}
-                    onRefresh={handleRefresh}
-                    scanRequest={duplicateScanRequest}
-                  />
                 )}
                 <Box bg={panelBg} borderRadius="md" borderWidth="1px" boxShadow="sm" overflow="hidden">
                   <Box px={{ base: 4, lg: 5 }} pt={4}>

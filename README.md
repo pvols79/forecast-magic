@@ -124,6 +124,8 @@ The Admin Funds tab uses swipeable fund buttons with combined parent/sub-fund re
 
 The Admin Forecast Detail tab traces the current synced Lunch Money balance through opening adjustments, today's forecast activity, and parent/sub-fund reservations to available to spend. Expand the sections to inspect LM transactions (including future-dated records), recurring decisions, fund funding/spending, and future allocation projections. Its source range is shown explicitly; it is a calculation report, not a bank reconciliation.
 
+The **Admin Workflow** tab contains the cleanup workflow and Duplicate Review for the selected account. It is available only in Admin view. Switching to Household view or logging out returns to Forecast; workflow controls no longer appear on the forecast page.
+
 The forecast header's **90 Day Lowest Balance** is the minimum available-to-spend balance from today through 90 days ahead, after all modeled activity and fund holds. The earliest low-point date is shown. This calculation always covers 90 days even when the chart horizon is shorter; future allocation projections do not become posted allocation history just because they were forecast.
 
 Upcoming also supports horizontal touch swiping, trackpad scrolling, arrow buttons, and left/right keyboard navigation.
