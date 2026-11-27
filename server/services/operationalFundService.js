@@ -18,7 +18,7 @@ export class OperationalFundService {
   getAllocationHistory(accountKey, throughDate) {
     const funds = this.repository.listByAccount(accountKey);
     return funds.flatMap(fund => this.repository.getAllocationHistory(fund.id)
-      .filter(entry => entry.periodStart <= (fund.archivedOn || throughDate)
+      .filter(entry => entry.allocationCents > 0 && entry.periodStart <= (fund.archivedOn || throughDate)
         && entry.periodStart <= throughDate && !isOpeningFundAllocation(fund, entry))
       .map(entry => ({
         fundId: fund.id, fundName: fund.name,

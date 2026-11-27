@@ -10,6 +10,8 @@ describe('account-wide allocation history', () => {
     ];
     const repository = { listByAccount: () => funds, getAllocationHistory: id => ({
       1: [
+        { periodStart: '2026-11-23', periodEnd: '2026-11-29', allocationCents: 0 },
+        { periodStart: '2026-11-16', periodEnd: '2026-11-22', allocationCents: 0, removedAt: 'timestamp' },
         { periodStart: '2026-07-18', periodEnd: '2026-08-17', allocationCents: 25000 },
         { periodStart: '2026-11-18', periodEnd: '2026-12-17', allocationCents: 25000 },
         { periodStart: '2026-12-18', periodEnd: '2027-01-17', allocationCents: 25000 },
