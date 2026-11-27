@@ -19,12 +19,10 @@ const AUTOMATION_TAG_NAMES = new Set([
   'n8nprocessed',
   'n8ncreated',
 ]);
-const PIPELINE_TAG_NAMES = new Set([
+const PLACEHOLDER_TAG_NAMES = new Set([
   ...N8N_PLACEHOLDER_TAG_NAMES,
   ...MANUAL_PLACEHOLDER_TAG_NAMES,
   ...LEGACY_PLACEHOLDER_TAG_NAMES,
-  'n8nprocessed',
-  'n8ncreated',
 ]);
 const MATCHED_IMPORT_TAG_NAME = 'matchedimport';
 const MEDIUM_MAX_DATE_DIFFERENCE_DAYS = 3;
@@ -58,7 +56,7 @@ export const normalizePayee = value => String(value || '')
 
 const normalizeTagName = value => String(value || '').toLowerCase().replace(/[^a-z0-9]/g, '');
 const isAutomationTagName = value => AUTOMATION_TAG_NAMES.has(normalizeTagName(value));
-const isPipelineTagName = value => PIPELINE_TAG_NAMES.has(normalizeTagName(value));
+const isPlaceholderTagName = value => PLACEHOLDER_TAG_NAMES.has(normalizeTagName(value));
 const isMatchedImportTagName = value => normalizeTagName(value) === MATCHED_IMPORT_TAG_NAME;
 const tagNameFor = (tag, tagNamesById = new Map()) => {
   if (typeof tag === 'string') return tag;
@@ -345,7 +343,8 @@ export const buildMetadataMerge = (manual, imported, options = {}) => {
   }
 
   const tagIds = unique([
-    ...imported.tagIds.filter(tagId => !isPipelineTagName(imported.tagNamesByTransactionTagId?.[tagId])),
+    ...imported.tagIds.filter(tagId => !isPlaceholderTagName(imported.tagNamesByTransactionTagId?.[tagId])),
+    ...manual.tagIds.filter(tagId => !isPlaceholderTagName(manual.tagNamesByTransactionTagId?.[tagId])),
     options.matchedImportTagId == null ? null : Number(options.matchedImportTagId),
   ])
     .sort((a, b) => a - b);
@@ -367,7 +366,7 @@ export const buildMetadataMerge = (manual, imported, options = {}) => {
       payee ? `Use payee: ${payee}` : null,
       categoryId != null ? `Use category: ${categoryId === manual.categoryId ? manual.categoryName : imported.categoryName}` : null,
       notes ? (notesConflict ? 'Merge or preserve both transaction notes' : 'Copy available notes') : null,
-      tagIds.length ? `Keep ${tagIds.length} imported tag${tagIds.length === 1 ? '' : 's'}` : 'Remove n8n/manual review tags from kept import',
+      'Merge tags from both transactions; remove only placeholder tags',
       recurringId ? `Keep recurring relationship #${recurringId}` : null,
       'Keep imported date, amount, account, and bank identity',
       'Permanently delete the manual transaction',

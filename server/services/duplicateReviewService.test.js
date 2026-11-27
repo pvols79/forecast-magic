@@ -116,6 +116,18 @@ describe('DuplicateReviewService', () => {
     expect(result).toMatchObject({ keptTransactionId: '2', deletedTransactionId: '1' });
   });
 
+  it('copies placeholder custom tags onto the kept import before deleting the placeholder', async () => {
+    const { service, manual, imported, calls } = setup({ manualSource: 'api' });
+    manual.tag_ids = [5, 3, 99];
+    imported.tag_ids = [2, 3];
+    await service.resolve({
+      accountKey: 'plaid:1', manualTransactionId: '1', importedTransactionId: '2',
+      ...fingerprints(manual, imported),
+    });
+    expect(calls.map(call => call.slice(0, 2))).toEqual([['update', '2'], ['delete', '1']]);
+    expect(calls[0][2].tag_ids).toEqual([3, 4, 99]);
+  });
+
   it('detects and safely resolves an API-created transaction paired with an imported transaction', async () => {
     const { service, manual, imported, calls } = setup({ manualSource: 'api' });
     const scan = await service.scan('plaid:1', { anchorDate: '2026-08-15' });

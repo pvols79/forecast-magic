@@ -9,6 +9,11 @@ const tagNames = new Map([
   [3, 'Household'],
   [4, 'matched_import'],
   [5, 'n8n_proc'],
+  [6, 'Birthday - Amy'],
+  [7, 'Christmas - Phil'],
+  [8, 'n8n_processed'],
+  [9, 'n8n_created'],
+  [10, 'N8N Pending'],
 ]);
 
 const transaction = overrides => {
@@ -350,6 +355,15 @@ describe('duplicate metadata merge', () => {
     expect(merge.update).not.toHaveProperty('amount');
     expect(merge.update).not.toHaveProperty('plaid_account_id');
     expect(merge.conflicts).toMatchObject({ payee: true, category: true, notes: true, recurring: false });
+  });
+
+  it('merges recipient and other non-placeholder tags from both records exactly once', () => {
+    const manual = transaction({ source: 'api', tag_ids: [5, 6, 3, 8, 9, 99] });
+    const imported = transaction({ source: 'plaid', tag_ids: [1, 2, 3, 7, 10] });
+    const merge = buildMetadataMerge(manual, imported, { matchedImportTagId: 4 });
+    expect(merge.update.tag_ids).toEqual([3, 4, 6, 7, 8, 9, 99]);
+    expect(manual.tagIds).toEqual([5, 6, 3, 8, 9, 99]);
+    expect(imported.tagIds).toEqual([1, 2, 3, 7, 10]);
   });
 
   it('can keep the imported payee when resolving a duplicate', () => {
