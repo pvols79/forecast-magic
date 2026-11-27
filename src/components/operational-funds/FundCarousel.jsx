@@ -53,18 +53,18 @@ const FundCarousel = ({ funds, states, selectedId, onSelect, allFunds }) => {
         const status = allocationStatus(fund, state);
         const childAutos = children.filter(child => child.active && child.allocationMode === 'scheduled' && child.periodType !== 'all-time').length;
         const remaining = fund.archivedAt ? fund.archivedRemainingCents : state?.remainingCents;
-        return <Button key={fund.id} variant="outline" color={textColor} fontWeight="normal" height="auto" minW={0} flex={{ base: '0 0 85%', sm: '0 0 44%', lg: '0 0 29%' }} maxW="330px"
-          p={4} whiteSpace="normal" textAlign="left" display="block" borderWidth="2px" borderColor={selectedId === fund.id ? 'blue.400' : 'transparent'}
+        return <Button key={fund.id} variant="outline" color={textColor} fontWeight="normal" height="auto" minW={0} flex="0 0 220px" maxW="220px"
+          p={3} whiteSpace="normal" textAlign="left" display="block" borderWidth="2px" borderColor={selectedId === fund.id ? 'blue.400' : 'transparent'}
           bg={selectedId === fund.id ? selectedBg : bg} _hover={{ bg: selectedBg }} _active={{ bg: selectedBg, color: textColor }} boxShadow="sm" aria-pressed={selectedId === fund.id}
           sx={{ scrollSnapAlign: 'start' }} onFocus={event => reveal(event.currentTarget)} onClick={event => { reveal(event.currentTarget); onSelect(fund.id); }}>
-          <Text fontWeight="bold" mb={2}>{fund.name}</Text>
-          <Badge colorScheme={{ reserved: 'purple', sinking: 'green', operating: 'blue' }[fund.fundType]}>{fund.fundType}</Badge>
-          <Text fontSize="2xl" fontWeight="bold" mt={2}>{money(remaining)}</Text>
-          <Text fontSize="xs" color="gray.500" mb={2}>{fund.archivedAt ? 'Balance at archive' : 'Reserved overall'}{children.length ? ` · ${children.length} sub-fund${children.length === 1 ? '' : 's'}` : ''}</Text>
-          <Text fontSize="sm">{fund.targetCents == null ? 'No goal set' : `${children.length ? 'Parent goal' : 'Goal'} ${money(fund.targetCents)}`}</Text>
+          <HStack justify="space-between" align="start" spacing={2}><Text fontSize="sm" fontWeight="bold" overflowWrap="anywhere">{fund.name}</Text>
+          <Badge fontSize="10px" colorScheme={{ reserved: 'purple', sinking: 'green', operating: 'blue' }[fund.fundType]}>{fund.fundType}</Badge></HStack>
+          <Text fontSize="xl" fontWeight="bold" mt={1}>{money(remaining)}</Text>
+          <Text fontSize="10px" color="gray.500" mb={1}>{fund.archivedAt ? 'Balance at archive' : 'Reserved overall'}{children.length ? ` · ${children.length} sub-fund${children.length === 1 ? '' : 's'}` : ''}</Text>
+          <Text fontSize="xs">{fund.targetCents == null ? 'No goal set' : `${children.length ? 'Parent goal' : 'Goal'} ${money(fund.targetCents)}`}</Text>
           {fund.targetCents != null && <Progress aria-label={`${fund.name} goal progress`} mt={2} size="xs" value={fund.targetCents > 0 ? Math.min(100, (state?.ownRemainingCents ?? remaining ?? 0) / fund.targetCents * 100) : 100} />}
-          <Badge mt={3} colorScheme={status.color} whiteSpace="normal">{status.label}</Badge>
-          {childAutos > 0 && <Text mt={1} fontSize="xs" color="gray.500">{childAutos} sub-fund schedule{childAutos === 1 ? '' : 's'} enabled</Text>}
+          <Badge fontSize="10px" mt={1} colorScheme={status.color} whiteSpace="normal">{status.label}</Badge>
+          {childAutos > 0 && <Text mt={1} fontSize="10px" color="gray.500">{childAutos} sub-fund schedule{childAutos === 1 ? '' : 's'} enabled</Text>}
         </Button>;
       })}
     </HStack>

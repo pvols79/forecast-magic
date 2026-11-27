@@ -36,6 +36,8 @@ const OperationalFundsManager = ({ accountKey, currentStates, onChanged, compact
   const form = useDisclosure();
   const adjust = useDisclosure();
   const bg = useColorModeValue('white', 'gray.700');
+  const childBg = useColorModeValue('purple.50', 'gray.800');
+  const childBorder = useColorModeValue('purple.200', 'purple.600');
   const mutedBg = useColorModeValue('gray.50', 'gray.800');
   const load = useCallback(async () => {
     if (!accountKey) return;
@@ -129,7 +131,7 @@ const OperationalFundsManager = ({ accountKey, currentStates, onChanged, compact
     <Box bg={bg} borderRadius="md" borderWidth="1px" p={{ base: 4, lg: 5 }} minH={compact ? undefined : '65vh'}>
       <HStack justify="space-between" mb={4} flexWrap="wrap" gap={2}>
         <Box><Heading size="md">{compact ? 'Fund Allocations' : 'Funds'}</Heading>
-          {!compact && <Text color="gray.500" fontSize="sm">Plan the occasion. Track the spending. Keep the history.</Text>}
+          {!compact && <Text color="gray.500" fontSize="sm">Plan the funding. Track the spending. Keep the history.</Text>}
         </Box>
         <HStack flexWrap="wrap" gap={2}>{!compact && <Button variant="outline" onClick={() => setShowArchived(value => !value)}>{showArchived ? 'View current funds' : 'View archived funds'}</Button>}{compact && <Button onClick={() => onOpenFunds?.()}>Open Funds</Button>}<Button colorScheme="blue" leftIcon={<FaPlus />} onClick={() => edit(null)}>Create Fund</Button></HStack>
       </HStack>
@@ -159,17 +161,23 @@ const OperationalFundsManager = ({ accountKey, currentStates, onChanged, compact
           <Box>
             <Heading size="sm" mb={2}>Sub-funds</Heading>
             <Text fontSize="sm" color="gray.500" mb={3}>Sub-funds add to the parent reservation. Move existing money from the parent to avoid increasing the total. Each category or tag belongs to one active fund or sub-fund in this account. A transaction matching both counts once.</Text>
-            {!children.length ? <Text color="gray.500">Add people for birthdays, or groups such as gifts, stockings, and holiday groceries.</Text> : <Box overflowX="auto"><Table size="sm"><Thead><Tr><Th>Name / occasion</Th><Th>Categories / tags</Th><Th isNumeric>Remaining</Th><Th>Purchase status</Th><Th /></Tr></Thead><Tbody>{children.map(child => {
-              const childState = child.archivedAt ? { remainingCents: child.archivedRemainingCents, transactions: [] } : states.get(child.id);
-              const purchases = (childState?.transactions || []).filter(row => row.type !== 'adjustment' && row.amount < 0 && !row.excluded);
-              return <Tr key={child.id} opacity={child.active ? 1 : 0.6}><Td><Button variant="link" onClick={() => setChildFilter(String(child.id))}>{child.name}</Button><Text fontSize="xs" color="gray.500">{child.occasionDate || 'No occasion date'}{!child.active && (child.archivedAt ? ' · Archived' : ' · Disabled')}</Text></Td>
-                <Td><Text>{child.categoryIds.map(id => categories.find(category => Number(category.id) === id)?.name || id).join(', ') || 'No categories'}</Text><Text fontSize="xs" color="gray.500">Tags: {(child.tagIds || []).map(id => tags.find(tag => Number(tag.id) === id)?.name || id).join(', ') || 'None'}{child.categoryIds.length > 0 && child.tagIds?.length > 0 ? ` · ${child.matchMode === 'all' ? 'Category AND tag' : 'Category OR tag'}` : ''}</Text></Td><Td isNumeric>{money(childState?.remainingCents)}{child.allocationMode === 'scheduled' && <Text fontSize="xs" color="gray.500">+{money(child.allocationCents)} / {child.periodType}</Text>}</Td>
-                <Td><Badge colorScheme={child.purchasedOn ? 'green' : purchases.length ? 'blue' : 'gray'}>{child.purchasedOn ? `Completed ${child.purchasedOn}` : purchases.length ? 'Spending recorded · verify gift' : 'Not purchased'}</Badge></Td><Td><Button size="xs" onClick={() => edit(child)}>Settings</Button></Td></Tr>;
-            })}</Tbody></Table></Box>}
+            {!children.length ? <Text color="gray.500">Add people for birthdays, or groups such as gifts, stockings, and holiday groceries.</Text> : <SimpleGrid columns={{ base: 1, xl: 2 }} spacing={3}>{children.map(child => {
+              const childState = child.archivedAt ? { remainingCents: child.archivedRemainingCents } : states.get(child.id);
+              return <Box key={child.id} p={3} bg={childBg} borderWidth="1px" borderLeftWidth="3px" borderColor={childFilter === String(child.id) ? 'blue.400' : childBorder} borderRadius="md" opacity={child.active ? 1 : 0.6} minW={0}>
+                <HStack justify="space-between" align="start" spacing={3} flexWrap="wrap">
+                  <Button variant="link" size="sm" whiteSpace="normal" textAlign="left" height="auto" aria-pressed={childFilter === String(child.id)} onClick={() => setChildFilter(String(child.id))}>{child.name}</Button>
+                  <HStack spacing={3}><Text fontWeight="bold" fontSize="lg" whiteSpace="nowrap">{money(childState?.remainingCents)}</Text><Button size="xs" variant="outline" aria-label={`Settings for ${child.name}`} onClick={() => edit(child)}>Settings</Button></HStack>
+                </HStack>
+                <Text fontSize="xs" mt={1} overflowWrap="anywhere">Categories: {child.categoryIds.map(id => categories.find(category => Number(category.id) === id)?.name || id).join(', ') || 'None'}</Text>
+                <Text fontSize="xs" color="gray.500" overflowWrap="anywhere">Tags: {(child.tagIds || []).map(id => tags.find(tag => Number(tag.id) === id)?.name || id).join(', ') || 'None'}{child.categoryIds.length > 0 && child.tagIds?.length > 0 ? ` · ${child.matchMode === 'all' ? 'Category AND tag' : 'Category OR tag'}` : ''}</Text>
+                {child.allocationMode === 'scheduled' && <Text fontSize="xs" color="gray.500">+{money(child.allocationCents)} / {child.periodType}</Text>}
+                {!child.active && <Badge mt={1} fontSize="10px">{child.archivedAt ? 'Archived' : 'Disabled'}</Badge>}
+              </Box>;
+            })}</SimpleGrid>}
           </Box>
           <Box>
             <HStack justify="space-between" mb={3} flexWrap="wrap" gap={2}><Heading size="sm">Activity register</Heading><HStack flexWrap="wrap" maxW="100%"><Select aria-label="Register period" size="sm" value={scope} onChange={event => setScope(event.target.value)}><option value="period">Current period</option><option value="all">{selected.includePriorSpending ? 'All matching history' : 'Since fund creation'}</option></Select>{children.length > 0 && <Select aria-label="Register sub-fund" size="sm" value={childFilter} onChange={event => setChildFilter(event.target.value)}><option value="">Entire fund</option>{members.map(member => <option key={member.id} value={member.id}>{member.id === selectedId ? 'Unassigned' : member.name}</option>)}</Select>}</HStack></HStack>
-            <Text fontSize="sm" color="gray.500" mb={3}>{selected.includePriorSpending ? 'Earlier matching category/tag activity is included in this fund’s balance. ' : 'Activity before fund creation is not included. Change this in Fund settings if needed. '}Funding, adjustments, spending, deposits, and refunds. Adjustments only change reserved money; they do not create bank transactions. Mark a gift complete in its sub-fund settings after checking the activity.</Text>
+            <Text fontSize="sm" color="gray.500" mb={3}>{selected.includePriorSpending ? 'Earlier matching category/tag activity is included in this fund’s balance. ' : 'Activity before fund creation is not included. Change this in Fund settings if needed. '}Funding, adjustments, spending, deposits, and refunds. Adjustments only change reserved money; they do not create bank transactions.</Text>
             {registerLoading ? <Spinner /> : !rows.length ? <Text color="gray.500">No activity in this period.</Text> : <Box overflowX="auto" maxH="60vh"><Table size="sm"><Thead position="sticky" top={0} bg={bg} zIndex={1}><Tr><Th>Date</Th><Th>Fund</Th><Th>Activity</Th><Th>Type</Th><Th isNumeric>Amount</Th><Th /></Tr></Thead><Tbody>{rows.map(row => <Tr key={`${row.fundId}:${row.transactionId}`} opacity={row.excluded || row.removed ? 0.5 : 1}><Td whiteSpace="nowrap">{row.date}</Td><Td>{row.subFundName}</Td><Td>{row.description}</Td><Td><Badge>{row.removed ? 'Removed' : row.excluded ? 'Excluded' : ['actual', 'pending'].includes(row.type) && row.amount > 0 ? (row.type === 'pending' ? 'Pending inflow' : 'Deposit / refund') : row.type}</Badge></Td><Td isNumeric whiteSpace="nowrap" textDecoration={row.removed ? 'line-through' : undefined} color={row.amount > 0 ? 'green.500' : undefined}>{row.amount > 0 ? '+' : ''}{formatCurrency(row.amount)}</Td><Td>{!selected.archivedAt && !funds.find(fund => fund.id === row.fundId)?.archivedAt && row.type === 'allocation' && !row.removed && <Button size="xs" colorScheme="red" variant="outline" isDisabled={saving} onClick={() => removeAllocation(row)}>Remove allocation</Button>}{!selected.archivedAt && !funds.find(fund => fund.id === row.fundId)?.archivedAt && ['actual', 'pending'].includes(row.type) && <Button size="xs" onClick={() => toggleExclusion(row)}>{row.excluded ? 'Re-include' : 'Exclude'}</Button>}</Td></Tr>)}</Tbody></Table></Box>}
           </Box>
         </VStack>}

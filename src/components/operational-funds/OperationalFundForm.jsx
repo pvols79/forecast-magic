@@ -75,10 +75,6 @@ const OperationalFundForm = ({ accountKey, categories, tags = [], funds = [], fu
             {funds.filter(item => !item.parentId && !item.archivedAt && item.id !== value.id).map(item => <option value={item.id} key={item.id}>{item.name}</option>)}
           </Select>
         </FormControl>}
-        <HStack align="start">
-          <FormControl><FormLabel>Occasion date (optional)</FormLabel><Input type="date" value={value.occasionDate || ''} onChange={event => set('occasionDate', event.target.value || null)} /></FormControl>
-          <FormControl><FormLabel>Purchase completed on</FormLabel><Input type="date" value={value.purchasedOn || ''} onChange={event => set('purchasedOn', event.target.value || null)} /></FormControl>
-        </HStack>
         <FormControl isRequired>
           <FormLabel>Type</FormLabel>
           <Select value={value.fundType} onChange={event => setFundType(event.target.value)}>
