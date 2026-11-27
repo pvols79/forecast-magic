@@ -18,6 +18,7 @@ import ViewModeControl from './components/ViewModeControl';
 import BrandMark from './components/BrandMark';
 import OperationalFundsManager from './components/operational-funds/OperationalFundsManager';
 import AdminWorkflow from './components/AdminWorkflow';
+import ReconciliationWorkflow from './components/ReconciliationWorkflow';
 import DuplicateReview from './components/DuplicateReview';
 import ShareReportButton from './components/ShareReportButton';
 import { getAccounts, getRecurringData, getPlaidAccounts, getTransactions } from './lunchmoney';
@@ -324,6 +325,7 @@ function App() {
             </HStack>}
             {activePage === 'workflow' && isAdminView && authStatus?.isAdmin && selectedAccount ? (
               <VStack key={selectedAccountId} spacing={4} w="100%" align="stretch">
+                <ReconciliationWorkflow key={selectedAccountId} accountKey={selectedAccountId} />
                 <AdminWorkflow
                   accountKey={selectedAccountId}
                   onRefresh={handleRefresh}

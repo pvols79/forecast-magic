@@ -10,6 +10,8 @@ RUN npm run build
 
 FROM node:22-alpine AS production
 
+RUN apk add --no-cache tesseract-ocr tesseract-ocr-data-eng
+
 WORKDIR /app
 ENV NODE_ENV=production
 ENV PORT=3000

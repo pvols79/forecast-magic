@@ -14,6 +14,14 @@ export const clearApiKey = async () => api.delete('/settings/api-key');
 export const getCategories = async () => (await api.get('/lunch-money/categories')).data.categories;
 export const getTags = async () => (await api.get('/lunch-money/tags')).data.tags;
 
+export const getReconciliationSession = async accountKey => (await api.get('/reconciliation/sessions/latest', { params: { accountKey } })).data.session;
+export const createReconciliationSession = async accountKey => (await api.post('/reconciliation/sessions', { accountKey })).data;
+export const uploadReconciliationEvidence = async (sessionId, kind, file) => (await api.post(`/reconciliation/sessions/${sessionId}/evidence`, file, {
+  params: { kind, filename: file.name }, headers: { 'Content-Type': 'application/octet-stream' },
+})).data;
+export const reviewReconciliationEvidence = async (sessionId, evidenceId, review) => (await api.put(`/reconciliation/sessions/${sessionId}/evidence/${evidenceId}/review`, review)).data;
+export const runReconciliation = async (sessionId, decisions) => (await api.post(`/reconciliation/sessions/${sessionId}/run`, { decisions })).data;
+
 export const getFinancialOverview = async (accountKey, anchorDate) => (
   await api.get('/analytics/overview', { params: { accountKey, anchorDate } })
 ).data;

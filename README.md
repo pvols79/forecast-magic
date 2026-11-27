@@ -20,6 +20,7 @@ Forecast Magic is independent software and is not affiliated with, endorsed by, 
 - Admin and read-only Household presentations
 - Admin-only review of likely placeholder/imported Lunch Money duplicates
 - Read-only financial health audits across Lunch Money, Capital One exports, n8n alerts, and Forecast Magic reservations
+- Admin Workflow reconciliation with reviewed CSV/image evidence, two-way matching, saved reports, and potential concerns
 - REST and MCP interfaces for conversational troubleshooting and automation
 - On-demand Admin or Household Daily Financial Highlight PDFs with share, download, and print actions
 - Persistent SQLite configuration for use across browsers and machines
@@ -40,6 +41,8 @@ Forecast Magic is independent software and is not affiliated with, endorsed by, 
 - Node.js 22 or later
 - npm
 - A Lunch Money API key
+
+See [Reconciliation workflow](docs/reconciliation_workflow.md) for uploading Capital One/Venmo exports and pending screenshots. The Docker image includes local screenshot text extraction; all extracted evidence is reviewed before a run.
 
 ## Install
 

@@ -14,11 +14,15 @@ import { createOperationalFundRouter } from './routes/operationalFundRoutes.js';
 import { createReportingRouter } from './routes/reportingRoutes.js';
 import { createSettingsRouter } from './routes/settingsRoutes.js';
 import { FinancialAuditService } from './services/financialAuditService.js';
+import { createReconciliationRouter } from './routes/reconciliationRoutes.js';
 
 export const createApp = () => {
   const app = express();
   const financialAuditService = new FinancialAuditService();
   app.set('trust proxy', 1);
+  // Evidence review accepts larger JSON, and uploads use raw binary bodies.
+  // Authenticate this surface before parsing either body type.
+  app.use('/api/reconciliation', attachAdminStatus, createReconciliationRouter());
   app.use(express.json({ limit: '100kb' }));
   app.use(attachAdminStatus);
 
